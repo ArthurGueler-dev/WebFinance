@@ -1,0 +1,133 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String        @id @default(cuid())
+  name          String?
+  email         String        @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  accounts      Account[]
+  bankAccounts  BankAccount[]
+  creditCards   CreditCard[]
+  sessions      Session[]
+  transactions  Transaction[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model BankAccount {
+  id             String        @id @default(cuid())
+  name           String
+  initialBalance Float
+  currentBalance Float
+  userId         String
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions   Transaction[]
+}
+
+model CreditCard {
+  id           String        @id @default(cuid())
+  name         String
+  limit        Float
+  dueDay       Int
+  closingDay   Int
+  userId       String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+}
+
+model Category {
+  id           String          @id @default(cuid())
+  name         String
+  color        String
+  icon         String?
+  type         TransactionType
+  createdAt    DateTime        @default(now())
+  transactions Transaction[]
+}
+
+model Transaction {
+  id                 String          @id @default(cuid())
+  description        String
+  amount             Float
+  date               DateTime
+  type               TransactionType
+  paymentMethod      PaymentMethod
+  recurrenceType     RecurrenceType  @default(SINGLE)
+  installments       Int?
+  currentInstallment Int?
+  categoryId         String
+  userId             String
+  bankAccountId      String?
+  creditCardId       String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  bankAccount        BankAccount?    @relation(fields: [bankAccountId], references: [id])
+  category           Category        @relation(fields: [categoryId], references: [id])
+  creditCard         CreditCard?     @relation(fields: [creditCardId], references: [id])
+  user               User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+}
+
+enum PaymentMethod {
+  CASH
+  DEBIT
+  CREDIT
+}
+
+enum RecurrenceType {
+  SINGLE
+  INSTALLMENT
+  RECURRING
+}

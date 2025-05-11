@@ -21,7 +21,7 @@ interface Transaction {
   amount: number;
   date: string;
   type: 'INCOME' | 'EXPENSE';
-  paymentMethod: 'CASH' | 'CREDIT' | 'DEBIT';
+  paymentMethod: 'CASH' | 'CREDIT' | 'DEBIT' | 'FOOD_VOUCHER';
   recurrenceType: 'SINGLE' | 'INSTALLMENT' | 'RECURRING';
   installments?: number | null;
   currentInstallment?: number | null;
@@ -345,6 +345,8 @@ export default function Transactions() {
   const getAccountName = (transaction: Transaction) => {
     if (transaction.paymentMethod === 'CREDIT' && transaction.creditCard) {
       return transaction.creditCard.name;
+    } else if (transaction.paymentMethod === 'FOOD_VOUCHER') {
+      return 'Vale Alimentação';
     } else if (transaction.bankAccount) {
       return transaction.bankAccount.name;
     }
@@ -547,7 +549,8 @@ export default function Transactions() {
                     </td>
                     <td className="px-6 py-4 text-sm">
                       {transaction.paymentMethod === 'CREDIT' ? 'Crédito' : 
-                       transaction.paymentMethod === 'DEBIT' ? 'Débito' : 'Dinheiro'}
+                       transaction.paymentMethod === 'DEBIT' ? 'Débito' : 
+                       transaction.paymentMethod === 'FOOD_VOUCHER' ? 'Vale Alimentação' : 'Dinheiro'}
                     </td>
                     <td className="px-6 py-4 text-right text-sm font-medium">
                       <span className={transaction.amount >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>

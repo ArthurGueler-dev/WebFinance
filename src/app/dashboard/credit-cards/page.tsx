@@ -348,9 +348,17 @@ export default function CreditCards() {
                   min="1"
                   max="31"
                   value={newCard.dueDay}
-                  onChange={(e) =>
-                    setNewCard({ ...newCard, dueDay: parseInt(e.target.value) || 1 })
-                  }
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (value === '') {
+                      setNewCard({ ...newCard, dueDay: '' as any });
+                    } else {
+                      const parsed = parseInt(value);
+                      if (!isNaN(parsed) && parsed >= 1 && parsed <= 31) {
+                        setNewCard({ ...newCard, dueDay: parsed });
+                      }
+                    }
+                  }}
                   required
                   disabled={isLoading}
                 />
@@ -365,9 +373,17 @@ export default function CreditCards() {
                   min="1"
                   max="31"
                   value={newCard.closingDay}
-                  onChange={(e) =>
-                    setNewCard({ ...newCard, closingDay: parseInt(e.target.value) || 1 })
-                  }
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (value === '') {
+                      setNewCard({ ...newCard, closingDay: '' as any });
+                    } else {
+                      const parsed = parseInt(value);
+                      if (!isNaN(parsed) && parsed >= 1 && parsed <= 31) {
+                        setNewCard({ ...newCard, closingDay: parsed });
+                      }
+                    }
+                  }}
                   required
                   disabled={isLoading}
                 />
@@ -542,7 +558,17 @@ export default function CreditCards() {
                     min="1"
                     max="31"
                     value={currentCard.dueDay}
-                    onChange={(e) => setCurrentCard({ ...currentCard, dueDay: parseInt(e.target.value) || 1 })}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === '') {
+                        setCurrentCard({ ...currentCard, dueDay: '' as any });
+                      } else {
+                        const parsed = parseInt(value);
+                        if (!isNaN(parsed) && parsed >= 1 && parsed <= 31) {
+                          setCurrentCard({ ...currentCard, dueDay: parsed });
+                        }
+                      }
+                    }}
                     required
                     disabled={isLoading}
                   />
@@ -557,7 +583,17 @@ export default function CreditCards() {
                     min="1"
                     max="31"
                     value={currentCard.closingDay}
-                    onChange={(e) => setCurrentCard({ ...currentCard, closingDay: parseInt(e.target.value) || 1 })}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === '') {
+                        setCurrentCard({ ...currentCard, closingDay: '' as any });
+                      } else {
+                        const parsed = parseInt(value);
+                        if (!isNaN(parsed) && parsed >= 1 && parsed <= 31) {
+                          setCurrentCard({ ...currentCard, closingDay: parsed });
+                        }
+                      }
+                    }}
                     required
                     disabled={isLoading}
                   />

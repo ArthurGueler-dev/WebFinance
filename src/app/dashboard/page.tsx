@@ -35,7 +35,7 @@ interface Transaction {
   amount: number;
   date: string;
   type: 'INCOME' | 'EXPENSE';
-  paymentMethod: 'CASH' | 'CREDIT' | 'DEBIT';
+  paymentMethod: 'CASH' | 'CREDIT' | 'DEBIT' | 'FOOD_VOUCHER';
   recurrenceType?: 'SINGLE' | 'INSTALLMENT' | 'RECURRING';
   installments?: number | null;
   currentInstallment?: number | null;

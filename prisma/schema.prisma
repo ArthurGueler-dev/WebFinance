@@ -124,6 +124,7 @@ enum PaymentMethod {
   CASH
   DEBIT
   CREDIT
+  FOOD_VOUCHER
 }
 
 enum RecurrenceType {

@@ -47,10 +47,18 @@ const ToastClose = React.forwardRef<
       e.preventDefault();
       const toast = e.currentTarget.closest('[data-state]');
       if (toast) {
-        const onOpenChange = toast.getAttribute('data-on-open-change');
-        if (onOpenChange) {
-          const fn = new Function('open', onOpenChange);
-          fn(false);
+        if (typeof props.onClick === 'function') {
+          props.onClick(e);
+        }
+        
+        const toastProps = (toast as any)._reactProps || (toast as any).__reactProps;
+        if (toastProps && typeof toastProps.onOpenChange === 'function') {
+          toastProps.onOpenChange(false);
+        } else {
+          toast.setAttribute('data-state', 'closed');
+          setTimeout(() => {
+            toast.remove();
+          }, 300);
         }
       }
     }}

@@ -159,9 +159,33 @@ export default function NewTransaction() {
           bankAccountId: '', // Limpar conta bancária se método for crédito
           creditCardId: creditCards.length > 0 ? creditCards[0].id : '', // Definir primeiro cartão
         });
+      } else if (value === 'FOOD_VOUCHER') {
+        // Para vale alimentação, não precisamos de conta ou cartão
+        setTransaction({
+          ...transaction,
+          paymentMethod: value,
+          creditCardId: '',
+          bankAccountId: '',
+          type: 'EXPENSE',  // Vale alimentação é sempre despesa
+        });
+        
+        // Pré-selecionar uma categoria de alimentação, se existir
+        const foodCategory = categories.find(c => 
+          (c.name.toLowerCase().includes('aliment') || 
+           c.name.toLowerCase().includes('comida') ||
+           c.name.toLowerCase().includes('refeic')) && 
+          c.type === 'EXPENSE'
+        );
+        
+        if (foodCategory) {
+          setTransaction(prev => ({
+            ...prev,
+            categoryId: foodCategory.id
+          }));
+        }
       } else {
-        // Se não houver contas bancárias e o método não for crédito, mostrar pop-up
-        if (bankAccounts.length === 0) {
+        // Se não houver contas bancárias e o método não for crédito ou vale alimentação, mostrar pop-up
+        if (bankAccounts.length === 0 && value !== 'FOOD_VOUCHER') {
           setShowAccountDialog(true);
         }
         
@@ -193,6 +217,11 @@ export default function NewTransaction() {
       
       if (transaction.paymentMethod === 'CREDIT' && !transaction.creditCardId) {
         throw new Error('Selecione um cartão de crédito para pagamentos com cartão de crédito.');
+      }
+      
+      if ((transaction.paymentMethod === 'DEBIT' || transaction.paymentMethod === 'CASH') && 
+          !transaction.bankAccountId && bankAccounts.length > 0) {
+        throw new Error('Selecione uma conta bancária para pagamentos em dinheiro ou débito.');
       }
       
       if (transaction.recurrenceType === 'INSTALLMENT' && parseInt(transaction.installments) < 2) {
@@ -426,9 +455,10 @@ export default function NewTransaction() {
                   <option value="CASH">Dinheiro</option>
                   <option value="DEBIT">Débito</option>
                   <option value="CREDIT">Crédito</option>
+                  <option value="FOOD_VOUCHER">Vale Alimentação</option>
                 </select>
               </div>
-              {transaction.paymentMethod !== 'CREDIT' ? (
+              {transaction.paymentMethod !== 'CREDIT' && transaction.paymentMethod !== 'FOOD_VOUCHER' ? (
                 <div className="space-y-2">
                   <label htmlFor="bankAccountId" className="text-sm font-medium leading-none">
                     Conta Bancária
@@ -464,7 +494,7 @@ export default function NewTransaction() {
                     </div>
                   )}
                 </div>
-              ) : (
+              ) : transaction.paymentMethod === 'CREDIT' ? (
                 <div className="space-y-2">
                   <label htmlFor="creditCardId" className="text-sm font-medium leading-none">
                     Cartão de Crédito
@@ -484,6 +514,15 @@ export default function NewTransaction() {
                       </option>
                     ))}
                   </select>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium leading-none">
+                    Vale Alimentação
+                  </label>
+                  <div className="flex h-10 items-center px-3 py-2 rounded-md border border-input bg-muted/50">
+                    <span className="text-sm text-muted-foreground">Transação com Vale Alimentação</span>
+                  </div>
                 </div>
               )}
               <div className="space-y-2">

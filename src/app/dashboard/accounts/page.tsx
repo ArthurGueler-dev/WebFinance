@@ -222,9 +222,17 @@ export default function Accounts() {
                 type="number"
                 step="0.01"
                 value={newAccount.initialBalance}
-                onChange={(e) =>
-                  setNewAccount({ ...newAccount, initialBalance: parseFloat(e.target.value) || 0 })
-                }
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value === '') {
+                    setNewAccount({ ...newAccount, initialBalance: '' as any });
+                  } else {
+                    const parsed = parseFloat(value);
+                    if (!isNaN(parsed)) {
+                      setNewAccount({ ...newAccount, initialBalance: parsed });
+                    }
+                  }
+                }}
                 required
                 disabled={isLoading}
               />
@@ -334,13 +342,23 @@ export default function Accounts() {
                   step="0.01"
                   value={currentAccount.initialBalance}
                   onChange={(e) => {
-                    const newInitialBalance = parseFloat(e.target.value) || 0;
-                    const diff = newInitialBalance - currentAccount.initialBalance;
-                    setCurrentAccount({ 
-                      ...currentAccount, 
-                      initialBalance: newInitialBalance,
-                      currentBalance: currentAccount.currentBalance + diff
-                    });
+                    const value = e.target.value;
+                    if (value === '') {
+                      setCurrentAccount({ 
+                        ...currentAccount, 
+                        initialBalance: '' as any 
+                      });
+                    } else {
+                      const parsedValue = parseFloat(value);
+                      if (!isNaN(parsedValue)) {
+                        const diff = parsedValue - currentAccount.initialBalance;
+                        setCurrentAccount({ 
+                          ...currentAccount, 
+                          initialBalance: parsedValue,
+                          currentBalance: currentAccount.currentBalance + diff
+                        });
+                      }
+                    }
                   }}
                   required
                   disabled={isLoading}

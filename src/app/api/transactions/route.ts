@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth';
 import { prisma } from '@/lib/prisma';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 
-// GET - Obter todas as transações do usuário
+// GET - Lista de transações
 export async function GET(request: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -15,46 +15,36 @@ export async function GET(request: Request) {
       );
     }
     
-    // Pegar parâmetros de consulta para filtrar
-    const url = new URL(request.url);
-    const categoryId = url.searchParams.get('categoryId');
-    const startDate = url.searchParams.get('startDate');
-    const endDate = url.searchParams.get('endDate');
-    const description = url.searchParams.get('description');
+    // Obter parâmetros de consulta 
+    const { searchParams } = new URL(request.url);
+    const creditCardId = searchParams.get('creditCardId');
+    const type = searchParams.get('type');
+    const bankAccountId = searchParams.get('bankAccountId');
+    const paymentMethod = searchParams.get('paymentMethod');
+    const startDate = searchParams.get('startDate');
+    const endDate = searchParams.get('endDate');
     
-    // Construir objeto de consulta
-    const where: any = {
+    // Construir filtros
+    const filters: any = {
       userId: session.user.id,
     };
     
-    if (categoryId) {
-      where.categoryId = categoryId;
+    // Adicionar filtros opcionais se fornecidos
+    if (creditCardId) filters.creditCardId = creditCardId;
+    if (type) filters.type = type;
+    if (bankAccountId) filters.bankAccountId = bankAccountId;
+    if (paymentMethod) filters.paymentMethod = paymentMethod;
+    
+    // Filtros de data
+    if (startDate || endDate) {
+      filters.date = {};
+      if (startDate) filters.date.gte = new Date(startDate);
+      if (endDate) filters.date.lte = new Date(endDate);
     }
     
-    if (startDate) {
-      where.date = {
-        ...where.date,
-        gte: new Date(startDate),
-      };
-    }
-    
-    if (endDate) {
-      where.date = {
-        ...where.date,
-        lte: new Date(endDate),
-      };
-    }
-    
-    if (description) {
-      where.description = {
-        contains: description,
-        mode: 'insensitive',
-      };
-    }
-    
-    // Buscar transações com categorias
+    // Buscar transações com filtros
     const transactions = await prisma.transaction.findMany({
-      where,
+      where: filters,
       include: {
         category: true,
         bankAccount: true,
@@ -65,17 +55,11 @@ export async function GET(request: Request) {
       },
     });
     
-    // Garantir que todas as despesas tenham valores positivos para consistência
-    const formattedTransactions = transactions.map(transaction => ({
-      ...transaction,
-      amount: transaction.type === 'EXPENSE' ? Math.abs(transaction.amount) : transaction.amount,
-    }));
-    
-    return NextResponse.json(formattedTransactions);
+    return NextResponse.json(transactions);
   } catch (error) {
     console.error('Erro ao buscar transações:', error);
     return NextResponse.json(
-      { error: 'Erro ao buscar transações' },
+      { error: 'Erro ao processar a requisição' },
       { status: 500 }
     );
   }

@@ -67,13 +67,46 @@ export default function CreditCards() {
         throw new Error('Falha ao carregar cartões de crédito');
       }
       const data = await response.json();
-      setCreditCards(data);
+      
+      // Para cada cartão, calcular o limite disponível
+      const enhancedCards = await Promise.all(
+        data.map(async (card: CreditCard) => {
+          // Buscar transações de despesa do cartão
+          const transactionsResponse = await fetch(`/api/transactions?creditCardId=${card.id}&type=EXPENSE`);
+          
+          if (transactionsResponse.ok) {
+            const transactions = await transactionsResponse.json();
+            
+            // Calcular total de despesas
+            const expensesSum = transactions.reduce(
+              (sum: number, t: any) => sum + Math.abs(t.amount),
+              0
+            );
+            
+            // Calcular limite disponível
+            const availableLimit = Math.max(0, card.limit - expensesSum);
+            
+            return {
+              ...card,
+              availableLimit
+            };
+          }
+          
+          // Se falhou ao buscar transações, retorna o cartão com limite disponível igual ao limite total
+          return {
+            ...card,
+            availableLimit: card.limit
+          };
+        })
+      );
+      
+      setCreditCards(enhancedCards);
     } catch (error) {
-      console.error('Erro ao buscar cartões:', error);
+      console.error('Erro ao carregar dados:', error);
       toast({
-        title: "Erro",
-        description: "Não foi possível carregar seus cartões de crédito.",
-        variant: "destructive"
+        title: 'Erro',
+        description: 'Não foi possível carregar os cartões.',
+        variant: 'destructive'
       });
     } finally {
       setIsLoading(false);
@@ -444,16 +477,12 @@ export default function CreditCards() {
                     <tr key={card.id} className="border-b">
                       <td className="px-6 py-4 text-sm font-medium">{card.name}</td>
                       <td className="px-6 py-4 text-right text-sm">
-                        R$ {formatCurrency(card.limit)}
-                      </td>
-                      <td className="px-6 py-4 text-right text-sm">
-                        R$ {formatCurrency(card.availableLimit)}
-                      </td>
-                      <td className="px-6 py-4 text-center text-sm">
-                        {card.dueDay}
-                      </td>
-                      <td className="px-6 py-4 text-center text-sm">
-                        {card.closingDay}
+                        <div>
+                          <div>Total: {formatCurrency(card.limit)}</div>
+                          <div className="text-green-600 dark:text-green-400">
+                            Disponível: {formatCurrency(card.availableLimit)}
+                          </div>
+                        </div>
                       </td>
                       <td className="px-6 py-4 text-right text-sm">
                         <div className="flex items-center gap-2">
@@ -467,6 +496,12 @@ export default function CreditCards() {
                           </div>
                           <span className="w-10 text-xs">{Math.round(usagePercentage)}%</span>
                         </div>
+                      </td>
+                      <td className="px-6 py-4 text-center text-sm">
+                        {card.dueDay}
+                      </td>
+                      <td className="px-6 py-4 text-center text-sm">
+                        {card.closingDay}
                       </td>
                       <td className="px-6 py-4 text-right text-sm">
                         <Button 

@@ -72,6 +72,14 @@ export default function DashboardLayout({
               Transações
             </Link>
             <Link
+              href="/dashboard/categories"
+              className={`flex items-center gap-3 rounded-lg px-3 py-2 ${
+                isActive('/dashboard/categories') ? 'bg-muted' : 'hover:bg-muted'
+              }`}
+            >
+              Categorias
+            </Link>
+            <Link
               href="/dashboard/reports"
               className={`flex items-center gap-3 rounded-lg px-3 py-2 ${
                 isActive('/dashboard/reports') ? 'bg-muted' : 'hover:bg-muted'

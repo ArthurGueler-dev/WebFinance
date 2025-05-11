@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui/use-toast';
+import { formatCurrency } from '@/lib/utils';
 import { 
   Dialog, 
   DialogContent, 
@@ -12,11 +13,6 @@ import {
   DialogTitle, 
   DialogFooter 
 } from '@/components/ui/dialog';
-
-// Função para formatar números de forma consistente
-const formatCurrency = (value: number): string => {
-  return value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-};
 
 // Interfaces para os tipos de dados
 interface Transaction {
@@ -536,12 +532,14 @@ export default function Transactions() {
                       )}
                     </td>
                     <td className="px-6 py-4 text-sm">
-                      <span className="inline-flex items-center gap-1">
+                      <span className="inline-flex items-center gap-2">
                         <span 
-                          className="w-3 h-3 rounded-full" 
+                          className="w-7 h-7 flex items-center justify-center rounded-full text-white"
                           style={{ backgroundColor: transaction.category?.color || '#888' }}
-                        ></span>
-                        {transaction.category?.name || 'Não categorizado'}
+                        >
+                          {transaction.category?.icon || '?'}
+                        </span>
+                        <span>{transaction.category?.name || 'Não categorizado'}</span>
                       </span>
                     </td>
                     <td className="px-6 py-4 text-sm">
@@ -551,10 +549,10 @@ export default function Transactions() {
                       {transaction.paymentMethod === 'CREDIT' ? 'Crédito' : 
                        transaction.paymentMethod === 'DEBIT' ? 'Débito' : 'Dinheiro'}
                     </td>
-                    <td className={`px-6 py-4 text-right text-sm font-medium ${
-                      transaction.type === 'INCOME' ? 'text-green-600' : 'text-red-600'
-                    }`}>
-                      {transaction.type === 'INCOME' ? '+' : '-'}R$ {formatCurrency(Math.abs(transaction.amount))}
+                    <td className="px-6 py-4 text-right text-sm font-medium">
+                      <span className={transaction.amount >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
+                        {formatCurrency(transaction.amount)}
+                      </span>
                     </td>
                     <td className="px-6 py-4 text-right text-sm">
                       <Link href={`/dashboard/transactions/${transaction.id}`}>

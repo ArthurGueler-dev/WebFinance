@@ -4,12 +4,7 @@ import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { toast } from '@/components/ui/use-toast';
-
-// Função para formatar números de forma consistente
-const formatCurrency = (value: number): string => {
-  // Usar um formato fixo que será igual tanto no cliente quanto no servidor
-  return value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-};
+import { formatCurrency } from '@/lib/utils';
 
 // Interfaces para os tipos de dados
 interface BankAccount {

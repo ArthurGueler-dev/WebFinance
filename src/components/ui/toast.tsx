@@ -43,6 +43,17 @@ const ToastClose = React.forwardRef<
       className
     )}
     toast-close=""
+    onClick={(e) => {
+      e.preventDefault();
+      const toast = e.currentTarget.closest('[data-state]');
+      if (toast) {
+        const onOpenChange = toast.getAttribute('data-on-open-change');
+        if (onOpenChange) {
+          const fn = new Function('open', onOpenChange);
+          fn(false);
+        }
+      }
+    }}
     {...props}
   >
     <X className="h-4 w-4" />

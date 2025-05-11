@@ -332,39 +332,68 @@ export default function NewTransaction() {
                 <label htmlFor="categoryId" className="text-sm font-medium leading-none">
                   Categoria
                 </label>
-                <select
-                  id="categoryId"
-                  name="categoryId"
-                  value={transaction.categoryId}
-                  onChange={handleChange}
-                  required
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                >
-                  <option value="">Selecione uma categoria</option>
-                  <optgroup label="Despesas">
+                <div className="grid gap-2 mt-2">
+                  <div className="flex items-center space-x-2">
+                    <select
+                      id="categoryId"
+                      name="categoryId"
+                      value={transaction.categoryId}
+                      onChange={handleChange}
+                      required
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    >
+                      <option value="">Selecione uma categoria</option>
+                      <optgroup label="Despesas">
+                        {categories
+                          .filter((category) => category.type === 'EXPENSE')
+                          .map((category) => (
+                            <option key={category.id} value={category.id}>
+                              {category.icon && `${category.icon} `}{category.name}
+                            </option>
+                          ))}
+                      </optgroup>
+                      <optgroup label="Receitas">
+                        {categories
+                          .filter((category) => category.type === 'INCOME')
+                          .map((category) => (
+                            <option key={category.id} value={category.id}>
+                              {category.icon && `${category.icon} `}{category.name}
+                            </option>
+                          ))}
+                      </optgroup>
+                    </select>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 mt-2 max-h-48 overflow-y-auto py-2 px-1 border rounded-md">
                     {categories
-                      .filter((category) => category.type === 'EXPENSE')
+                      .filter((category) => category.type === transaction.type)
                       .map((category) => (
-                        <option key={category.id} value={category.id}>
-                          {category.name} {category.icon && `(${category.icon})`}
-                        </option>
+                        <div 
+                          key={category.id}
+                          onClick={() => setTransaction({...transaction, categoryId: category.id})}
+                          className={`flex items-center p-2 rounded-md cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors ${
+                            transaction.categoryId === category.id 
+                              ? 'ring-2 ring-primary bg-primary/10' 
+                              : ''
+                          }`}
+                          style={{
+                            borderLeft: `4px solid ${category.color}`
+                          }}
+                        >
+                          <div className="flex items-center space-x-2">
+                            <span className="text-xl">{category.icon}</span>
+                            <span className="text-sm font-medium truncate">{category.name}</span>
+                          </div>
+                        </div>
                       ))}
-                  </optgroup>
-                  <optgroup label="Receitas">
-                    {categories
-                      .filter((category) => category.type === 'INCOME')
-                      .map((category) => (
-                        <option key={category.id} value={category.id}>
-                          {category.name} {category.icon && `(${category.icon})`}
-                        </option>
-                      ))}
-                  </optgroup>
-                </select>
-                {categories.length === 0 && (
-                  <p className="text-xs text-red-500 mt-1">
-                    Nenhuma categoria disponível. Crie categorias primeiro.
-                  </p>
-                )}
+                  </div>
+                  
+                  {categories.length === 0 && (
+                    <p className="text-xs text-red-500 mt-1">
+                      Nenhuma categoria disponível. Crie categorias primeiro.
+                    </p>
+                  )}
+                </div>
               </div>
               <div className="space-y-2">
                 <label htmlFor="type" className="text-sm font-medium leading-none">

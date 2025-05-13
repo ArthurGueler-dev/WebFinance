@@ -8,12 +8,13 @@ export type ToastProps = React.HTMLAttributes<HTMLDivElement> & {
   variant?: "default" | "destructive"
   onOpenChange?: (open: boolean) => void
   open?: boolean
+  duration?: number
 }
 
 export type ToastActionElement = React.ReactElement
 
 const Toast = React.forwardRef<HTMLDivElement, ToastProps>(
-  ({ className, variant = "default", ...props }, ref) => {
+  ({ className, variant = "default", duration = 5000, ...props }, ref) => {
     return (
       <div
         ref={ref}
@@ -25,6 +26,7 @@ const Toast = React.forwardRef<HTMLDivElement, ToastProps>(
             "destructive group border-destructive bg-destructive text-destructive-foreground",
           className
         )}
+        data-duration={duration}
         {...props}
       />
     )
@@ -93,4 +95,38 @@ const ToastDescription = React.forwardRef<
 ))
 ToastDescription.displayName = "ToastDescription"
 
-export { Toast, ToastClose, ToastTitle, ToastDescription } 
+const ToastProgress = React.forwardRef<
+  HTMLDivElement,
+  React.HTMLAttributes<HTMLDivElement> & { value?: number, duration?: number }
+>(({ className, value = 100, duration = 5000, ...props }, ref) => {
+  const [progress, setProgress] = React.useState(100)
+  
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      setProgress(0)
+    }, 100)
+    
+    return () => {
+      clearTimeout(timer)
+    }
+  }, [])
+  
+  return (
+    <div
+      ref={ref}
+      className={cn("absolute bottom-0 left-0 right-0 h-1 w-full bg-muted", className)}
+      {...props}
+    >
+      <div 
+        className="h-full bg-primary transition-all duration-300 ease-linear"
+        style={{ 
+          width: `${progress}%`, 
+          transitionDuration: `${duration}ms`,
+        }} 
+      />
+    </div>
+  )
+})
+ToastProgress.displayName = "ToastProgress"
+
+export { Toast, ToastClose, ToastTitle, ToastDescription, ToastProgress } 

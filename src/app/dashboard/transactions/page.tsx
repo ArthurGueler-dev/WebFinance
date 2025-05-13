@@ -59,6 +59,14 @@ interface BankAccount {
 interface CreditCard {
   id: string;
   name: string;
+  limit: number;
+  dueDay: number;
+  closingDay: number;
+  userId: string;
+  createdAt: string;
+  updatedAt: string;
+  availableLimit: number;
+  isVoucherCard?: boolean;
 }
 
 export default function Transactions() {
@@ -70,6 +78,10 @@ export default function Transactions() {
   const [creditCards, setCreditCards] = useState<CreditCard[]>([]);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [currentTransaction, setCurrentTransaction] = useState<Transaction | null>(null);
+  
+  // Estado para seleção múltipla
+  const [selectedTransactions, setSelectedTransactions] = useState<Set<string>>(new Set());
+  const [showMultiDeleteDialog, setShowMultiDeleteDialog] = useState(false);
 
   // Filter state
   const [filters, setFilters] = useState({
@@ -198,6 +210,20 @@ export default function Transactions() {
       ...filters,
       [name]: value,
     });
+    
+    // Se o campo for descrição, aplicar busca em tempo real
+    if (name === 'description') {
+      // Esperar um curto intervalo antes de buscar, para evitar muitas requisições
+      const debounceTimer = setTimeout(() => {
+        // Buscar transações com o novo valor de descrição
+        fetchTransactions().catch(error => {
+          console.error('Erro ao buscar transações:', error);
+        });
+      }, 300); // 300ms de espera
+      
+      // Limpar timeout ao digitar novamente
+      return () => clearTimeout(debounceTimer);
+    }
   };
 
   // Aplicar filtros
@@ -267,6 +293,80 @@ export default function Transactions() {
     }
   };
 
+  // Excluir múltiplas transações
+  const handleDeleteMultipleTransactions = async () => {
+    if (selectedTransactions.size === 0) return;
+    
+    setIsLoading(true);
+    
+    try {
+      const deletePromises = Array.from(selectedTransactions).map(id => 
+        fetch(`/api/transactions/${id}`, {
+          method: 'DELETE',
+        })
+      );
+      
+      const results = await Promise.allSettled(deletePromises);
+      
+      // Contar sucessos e falhas
+      const succeeded = results.filter(r => r.status === 'fulfilled').length;
+      const failed = results.filter(r => r.status === 'rejected').length;
+      
+      // Filtrar transações que foram excluídas com sucesso
+      const successfullyDeletedIds = new Set();
+      
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          const id = Array.from(selectedTransactions)[index];
+          successfullyDeletedIds.add(id);
+        }
+      });
+      
+      setTransactions(transactions.filter(t => !successfullyDeletedIds.has(t.id)));
+      
+      // Limpar seleção
+      setSelectedTransactions(new Set());
+      setShowMultiDeleteDialog(false);
+      
+      toast({
+        title: "Transações excluídas",
+        description: `${succeeded} transações foram excluídas com sucesso. ${failed > 0 ? `${failed} transações falharam.` : ''}`,
+        variant: failed > 0 ? "destructive" : "default"
+      });
+    } catch (error) {
+      console.error('Erro ao excluir transações:', error);
+      toast({
+        title: "Erro",
+        description: "Ocorreu um erro ao tentar excluir as transações.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Selecionar/desselecionar uma transação
+  const toggleTransactionSelection = (id: string) => {
+    const newSelected = new Set(selectedTransactions);
+    if (newSelected.has(id)) {
+      newSelected.delete(id);
+    } else {
+      newSelected.add(id);
+    }
+    setSelectedTransactions(newSelected);
+  };
+
+  // Selecionar/desselecionar todas as transações
+  const toggleSelectAll = () => {
+    if (selectedTransactions.size === transactions.length) {
+      // Se todas estão selecionadas, desmarca todas
+      setSelectedTransactions(new Set());
+    } else {
+      // Caso contrário, marca todas
+      setSelectedTransactions(new Set(transactions.map(t => t.id)));
+    }
+  };
+
   // Calcular totais
   // Para transações recorrentes (salário, etc.), agrupe por mês para evitar contagem duplicada
   const calculateTotals = () => {
@@ -275,65 +375,81 @@ export default function Transactions() {
     // Chave interna: id da transação ou chave única para recorrentes, valor: transação
     const monthlyTransactions = new Map<string, Map<string, Transaction>>();
     
+    // Identificar cartões de Vale Alimentação
+    const foodVoucherCardIds = new Set();
+    creditCards
+      .filter(card => card.name.includes('[Vale Alimentação]') || card.isVoucherCard === true)
+      .forEach(card => foodVoucherCardIds.add(card.id));
+    
     // Agrupar transações por mês
     transactions.forEach(transaction => {
       const date = new Date(transaction.date);
       const monthKey = `${date.getFullYear()}-${date.getMonth() + 1}`;
       
       if (!monthlyTransactions.has(monthKey)) {
-        monthlyTransactions.set(monthKey, new Map<string, Transaction>());
+        monthlyTransactions.set(monthKey, new Map());
       }
       
       const monthMap = monthlyTransactions.get(monthKey)!;
       
-      // Para transações recorrentes, use uma chave composta para identificar unicamente
+      // Para transações recorrentes, use uma chave única
+      let key = transaction.id;
       if (transaction.recurrenceType === 'RECURRING') {
-        // Chave única baseada na descrição, tipo e categoria
-        const key = `recurring_${transaction.description}_${transaction.type}_${transaction.categoryId}`;
-        
-        // Para transações recorrentes no mesmo mês, manter apenas a mais recente
-        if (!monthMap.has(key) || new Date(transaction.date) > new Date(monthMap.get(key)!.date)) {
-          monthMap.set(key, transaction);
-        }
-      } 
-      // Para transações de parcelas, tratar cada parcela como única
-      else if (transaction.recurrenceType === 'INSTALLMENT') {
-        // Chave única para cada parcela
-        const key = `installment_${transaction.id}`;
-        monthMap.set(key, transaction);
+        key = `recurring_${transaction.description}_${transaction.categoryId}`;
       }
-      // Para transações simples (não recorrentes)
-      else {
-        monthMap.set(transaction.id, transaction);
+      
+      // Se não existe ou esta é mais recente, atualizar o mapa
+      if (!monthMap.has(key) || new Date(transaction.date) > new Date(monthMap.get(key)!.date)) {
+        monthMap.set(key, transaction);
       }
     });
     
-    // Calcular totais usando as transações processadas
     let incomeTotal = 0;
     let expenseTotal = 0;
+    let foodVoucherTotal = 0;
     
     // Iterar por todos os meses
     monthlyTransactions.forEach(monthMap => {
       // Iterar por todas as transações no mês
       monthMap.forEach(transaction => {
-        // Somar receitas
+        // Verificar se é uma transação de vale alimentação
+        const isFoodVoucher = 
+          transaction.paymentMethod === 'FOOD_VOUCHER' || 
+          (transaction.creditCard && foodVoucherCardIds.has(transaction.creditCard.id)) ||
+          (transaction.description.toLowerCase().includes('vale alimentação') && transaction.type === 'INCOME') ||
+          (transaction.description.toLowerCase().includes('va ') && transaction.type === 'INCOME') ||
+          (transaction.description.toLowerCase().includes('ticket ') && transaction.type === 'INCOME');
+        
         if (transaction.type === 'INCOME') {
-          incomeTotal += transaction.amount;
-        } 
-        // Somar despesas
-        else if (transaction.type === 'EXPENSE') {
-          expenseTotal += transaction.amount;
+          if (isFoodVoucher) {
+            // Receitas de VA devem ir para o total de VA, não para income
+            foodVoucherTotal += transaction.amount;
+          } else {
+            incomeTotal += transaction.amount;
+          }
+        } else {
+          // Diferencia entre gastos normais e gastos com vale alimentação
+          if (isFoodVoucher) {
+            foodVoucherTotal += Math.abs(transaction.amount);
+          } else {
+            expenseTotal += Math.abs(transaction.amount);
+          }
         }
       });
     });
     
-    // Calcular o saldo (receitas - despesas)
+    // Calcular saldo (sem considerar transações de vale alimentação no cálculo)
     const balance = incomeTotal - expenseTotal;
     
-    return { incomeTotal, expenseTotal, balance };
+    return {
+      incomeTotal,
+      expenseTotal,
+      foodVoucherTotal,
+      balance
+    };
   };
   
-  const { incomeTotal, expenseTotal, balance } = calculateTotals();
+  const { incomeTotal, expenseTotal, foodVoucherTotal, balance } = calculateTotals();
 
   // Formatação de data para exibição
   const formatDate = (dateString: string) => {
@@ -353,27 +469,133 @@ export default function Transactions() {
     return transaction.paymentMethod === 'CREDIT' ? 'Cartão não especificado' : 'Sem conta associada';
   };
 
+  // Agrupar transações por mês
+  const groupTransactionsByMonth = () => {
+    const groupedTransactions: {
+      monthKey: string;
+      monthLabel: string;
+      transactions: Transaction[];
+      incomeTotal: number;
+      expenseTotal: number;
+      foodVoucherTotal: number;
+    }[] = [];
+    
+    if (transactions.length === 0) return groupedTransactions;
+    
+    // Agrupar por mês
+    const monthGroups = new Map<string, Transaction[]>();
+    
+    // Ordenar transações por data (mais recentes primeiro)
+    const sortedTransactions = [...transactions].sort(
+      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+    );
+    
+    // Identificar cartões de Vale Alimentação
+    const foodVoucherCardIds = new Set();
+    creditCards
+      .filter(card => card.name.includes('[Vale Alimentação]') || card.isVoucherCard === true)
+      .forEach(card => foodVoucherCardIds.add(card.id));
+    
+    // Agrupar por mês
+    sortedTransactions.forEach(transaction => {
+      const date = new Date(transaction.date);
+      const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      
+      if (!monthGroups.has(monthKey)) {
+        monthGroups.set(monthKey, []);
+      }
+      
+      monthGroups.get(monthKey)!.push(transaction);
+    });
+    
+    // Converter mapa para array e calcular totais por mês
+    const months = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+    
+    // Ordenar meses (mais recentes primeiro)
+    const sortedMonthKeys = Array.from(monthGroups.keys()).sort().reverse();
+    
+    sortedMonthKeys.forEach(monthKey => {
+      const [year, month] = monthKey.split('-').map(Number);
+      const monthLabel = `${months[month-1]} de ${year}`;
+      const monthTransactions = monthGroups.get(monthKey)!;
+      
+      // Calcular totais do mês
+      let incomeTotal = 0;
+      let expenseTotal = 0;
+      let foodVoucherTotal = 0;
+      
+      monthTransactions.forEach(transaction => {
+        // Verificar se é uma transação de vale alimentação
+        const isFoodVoucher = 
+          transaction.paymentMethod === 'FOOD_VOUCHER' || 
+          (transaction.creditCard && foodVoucherCardIds.has(transaction.creditCard.id)) ||
+          (transaction.description.toLowerCase().includes('vale alimentação') && transaction.type === 'INCOME') ||
+          (transaction.description.toLowerCase().includes('va ') && transaction.type === 'INCOME') ||
+          (transaction.description.toLowerCase().includes('ticket ') && transaction.type === 'INCOME');
+        
+        if (transaction.type === 'INCOME') {
+          if (isFoodVoucher) {
+            // Receitas de VA devem ir para o total de VA, não para income
+            foodVoucherTotal += transaction.amount;
+          } else {
+            incomeTotal += transaction.amount;
+          }
+        } else {
+          // Diferencia entre gastos normais e gastos com vale alimentação
+          if (isFoodVoucher) {
+            foodVoucherTotal -= Math.abs(transaction.amount); // Subtrai do saldo de VA
+          } else {
+            expenseTotal += Math.abs(transaction.amount);
+          }
+        }
+      });
+      
+      groupedTransactions.push({
+        monthKey,
+        monthLabel,
+        transactions: monthTransactions,
+        incomeTotal,
+        expenseTotal,
+        foodVoucherTotal
+      });
+    });
+    
+    return groupedTransactions;
+  };
+  
+  const groupedTransactions = groupTransactionsByMonth();
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold tracking-tight">Transações</h1>
-        <Link href="/dashboard/transactions/new">
-          <Button>Adicionar Transação</Button>
-        </Link>
+        <div className="flex space-x-2">
+          {selectedTransactions.size > 0 && (
+            <Button 
+              variant="destructive"
+              onClick={() => setShowMultiDeleteDialog(true)}
+            >
+              Excluir ({selectedTransactions.size})
+            </Button>
+          )}
+          <Link href="/dashboard/transactions/new">
+            <Button>Adicionar Transação</Button>
+          </Link>
+        </div>
       </div>
 
       {/* Alerta para contas bancárias */}
       {bankAccounts.length === 0 && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 flex items-center justify-between">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/20 p-4 flex items-center justify-between">
           <div className="flex items-center">
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-500 mr-2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-500 dark:text-amber-400 mr-2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
             <div>
-              <p className="font-medium text-amber-800">Nenhuma conta bancária cadastrada</p>
-              <p className="text-sm text-amber-600">Para melhor controle financeiro, recomendamos cadastrar suas contas bancárias.</p>
+              <p className="font-medium text-amber-800 dark:text-amber-400">Nenhuma conta bancária cadastrada</p>
+              <p className="text-sm text-amber-600 dark:text-amber-500">Para melhor controle financeiro, recomendamos cadastrar suas contas bancárias.</p>
             </div>
           </div>
           <Link href="/dashboard/accounts">
-            <Button variant="outline" className="border-amber-300 hover:border-amber-400 hover:bg-amber-100">
+            <Button variant="outline" className="border-amber-300 hover:border-amber-400 hover:bg-amber-100 dark:border-amber-800 dark:hover:border-amber-700 dark:hover:bg-amber-900/30">
               Cadastrar conta
             </Button>
           </Link>
@@ -470,8 +692,71 @@ export default function Transactions() {
           <div className="flex flex-col gap-1">
             <p className="text-sm font-medium text-muted-foreground">Saldo</p>
             <h2 className={`text-2xl font-bold ${balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-              {balance >= 0 ? '+' : ''}R$ {formatCurrency(Math.abs(balance))}
+              {balance >= 0 ? '+' : '-'}R$ {formatCurrency(Math.abs(balance))}
             </h2>
+            {foodVoucherTotal > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Vale Alimentação não afeta o saldo
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {foodVoucherTotal !== 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-800/50 dark:bg-amber-900/20 p-4 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-semibold text-amber-800 dark:text-amber-300">Vale Alimentação (VA)</h3>
+              <p className="text-sm text-amber-700 dark:text-amber-400">
+                Saldo separado que não impacta suas finanças gerais
+              </p>
+            </div>
+            <div className="flex flex-col items-end">
+              <p className="text-sm text-amber-700 dark:text-amber-400">Saldo disponível</p>
+              <p className={`text-2xl font-bold ${foodVoucherTotal >= 0 ? 'text-green-600 dark:text-green-300' : 'text-red-600 dark:text-red-300'}`}>
+                {foodVoucherTotal >= 0 ? '+' : '-'}R$ {formatCurrency(Math.abs(foodVoucherTotal))}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Informação sobre como os saldos são calculados */}
+      <div className="rounded-xl border border-blue-100 bg-blue-50 dark:border-blue-900 dark:bg-blue-950/20 p-4">
+        <div className="flex">
+          <div className="flex-shrink-0">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5 text-blue-600 dark:text-blue-400">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="16" x2="12" y2="12"></line>
+              <line x1="12" y1="8" x2="12.01" y2="8"></line>
+            </svg>
+          </div>
+          <div className="ml-3">
+            <h3 className="text-sm font-medium text-blue-800 dark:text-blue-400">Como os saldos são calculados</h3>
+            <div className="mt-2 text-sm text-blue-700 dark:text-blue-500">
+              <p>
+                O saldo mostrado acima é calculado a partir de todas as transações registradas no sistema.
+              </p>
+              <ul className="list-disc ml-5 mt-1 space-y-1">
+                <li>
+                  <strong>Saldo de cartão de crédito:</strong> O limite disponível dos cartões é atualizado 
+                  automaticamente quando você registra transações de despesa usando o cartão específico.
+                </li>
+                <li>
+                  <strong>Saldo de contas bancárias:</strong> O saldo atual é atualizado quando você registra 
+                  transações associadas à conta.
+                </li>
+                <li>
+                  <strong>Vale Alimentação:</strong> Transações marcadas como Vale Alimentação são contabilizadas 
+                  separadamente e não afetam o saldo geral.
+                </li>
+              </ul>
+              <p className="mt-2">
+                Para manter seus saldos atualizados corretamente, registre todas as suas transações e 
+                associe-as às contas ou cartões correspondentes.
+              </p>
+            </div>
           </div>
         </div>
       </div>
@@ -481,6 +766,15 @@ export default function Transactions() {
           <table className="w-full">
             <thead>
               <tr className="border-b">
+                <th className="px-3 py-3">
+                  <input
+                    type="checkbox"
+                    checked={selectedTransactions.size === transactions.length && transactions.length > 0}
+                    onChange={toggleSelectAll}
+                    disabled={transactions.length === 0}
+                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                  />
+                </th>
                 <th className="px-6 py-3 text-left text-sm font-medium text-muted-foreground">
                   Data
                 </th>
@@ -507,80 +801,180 @@ export default function Transactions() {
             <tbody>
               {isLoading ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-4 text-center text-sm text-muted-foreground">
+                  <td colSpan={8} className="px-6 py-4 text-center text-sm text-muted-foreground">
                     Carregando transações...
                   </td>
                 </tr>
               ) : transactions.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-4 text-center text-sm text-muted-foreground">
+                  <td colSpan={8} className="px-6 py-4 text-center text-sm text-muted-foreground">
                     Nenhuma transação encontrada
                   </td>
                 </tr>
               ) : (
-                transactions.map((transaction) => (
-                  <tr key={transaction.id} className="border-b">
-                    <td className="px-6 py-4 text-sm">
-                      {formatDate(transaction.date)}
-                    </td>
-                    <td className="px-6 py-4 text-sm font-medium">
-                      {transaction.description}
-                      {transaction.recurrenceType !== 'SINGLE' && (
-                        <span className="ml-2 text-xs bg-muted px-2 py-0.5 rounded-full">
-                          {transaction.recurrenceType === 'INSTALLMENT' 
-                            ? `Parcela ${transaction.currentInstallment}/${transaction.installments}` 
-                            : 'Recorrente'}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 text-sm">
-                      <span className="inline-flex items-center gap-2">
-                        <span 
-                          className="w-7 h-7 flex items-center justify-center rounded-full text-white"
-                          style={{ backgroundColor: transaction.category?.color || '#888' }}
-                        >
-                          {transaction.category?.icon || '?'}
-                        </span>
-                        <span>{transaction.category?.name || 'Não categorizado'}</span>
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-sm">
-                      {getAccountName(transaction)}
-                    </td>
-                    <td className="px-6 py-4 text-sm">
-                      {transaction.paymentMethod === 'CREDIT' ? 'Crédito' : 
-                       transaction.paymentMethod === 'DEBIT' ? 'Débito' : 
-                       transaction.paymentMethod === 'FOOD_VOUCHER' ? 'Vale Alimentação' : 'Dinheiro'}
-                    </td>
-                    <td className="px-6 py-4 text-right text-sm font-medium">
-                      <span className={transaction.amount >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
-                        {formatCurrency(transaction.amount)}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-right text-sm">
-                      <Link href={`/dashboard/transactions/${transaction.id}`}>
-                        <Button variant="outline" size="sm" className="mr-2">
-                          Editar
-                        </Button>
-                      </Link>
-                      <Button 
-                        variant="destructive" 
-                        size="sm"
-                        onClick={() => {
-                          setCurrentTransaction(transaction);
-                          setShowDeleteDialog(true);
-                        }}
-                      >
-                        Excluir
-                      </Button>
-                    </td>
-                  </tr>
+                groupedTransactions.map((group) => (
+                  <>
+                    <tr key={`header-${group.monthKey}`} className="border-b bg-muted/50">
+                      <td colSpan={8} className="px-6 py-4">
+                        <div className="flex items-center justify-between">
+                          <div className="font-semibold text-lg">{group.monthLabel}</div>
+                          <div className="flex items-center gap-4 text-sm">
+                            <div className="flex flex-col items-end">
+                              <span className="text-gray-500">Receitas</span>
+                              <span className="font-medium text-green-600">+R$ {formatCurrency(group.incomeTotal)}</span>
+                            </div>
+                            <div className="flex flex-col items-end">
+                              <span className="text-gray-500">Despesas</span>
+                              <span className="font-medium text-red-600">-R$ {formatCurrency(group.expenseTotal)}</span>
+                            </div>
+                            {group.foodVoucherTotal > 0 && (
+                              <div className="flex flex-col items-end">
+                                <span className="text-gray-500">Vale Alimentação</span>
+                                <span className="font-medium text-amber-600">-R$ {formatCurrency(group.foodVoucherTotal)}</span>
+                              </div>
+                            )}
+                            <div className="flex flex-col items-end">
+                              <span className="text-gray-500">Saldo</span>
+                              <span className={`font-medium ${group.incomeTotal - group.expenseTotal >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                {group.incomeTotal - group.expenseTotal >= 0 ? '+' : '-'}R$ {formatCurrency(Math.abs(group.incomeTotal - group.expenseTotal))}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                    {group.transactions.map((transaction) => (
+                      <tr key={transaction.id} className="border-b hover:bg-muted/20 transition-colors">
+                        <td className="px-3 py-4">
+                          <input
+                            type="checkbox"
+                            checked={selectedTransactions.has(transaction.id)}
+                            onChange={() => toggleTransactionSelection(transaction.id)}
+                            className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                          />
+                        </td>
+                        <td className="px-6 py-4 text-sm">
+                          {formatDate(transaction.date)}
+                        </td>
+                        <td className="px-6 py-4 text-sm font-medium">
+                          {transaction.description}
+                          {transaction.recurrenceType !== 'SINGLE' && (
+                            <span className="ml-2 text-xs bg-muted px-2 py-0.5 rounded-full">
+                              {transaction.recurrenceType === 'INSTALLMENT' 
+                                ? `Parcela ${transaction.currentInstallment || 1}/${transaction.installments}` 
+                                : 'Recorrente'}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 text-sm">
+                          <span className="inline-flex items-center gap-2">
+                            <span 
+                              className="w-7 h-7 flex items-center justify-center rounded-full text-white"
+                              style={{ backgroundColor: transaction.category?.color || '#888' }}
+                            >
+                              {transaction.category?.icon || '?'}
+                            </span>
+                            <span>{transaction.category?.name || 'Não categorizado'}</span>
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-sm">
+                          {getAccountName(transaction)}
+                        </td>
+                        <td className="px-6 py-4 text-sm">
+                          {transaction.paymentMethod === 'CREDIT' ? (
+                            transaction.creditCard?.name || 'Cartão de Crédito'
+                          ) : transaction.paymentMethod === 'FOOD_VOUCHER' ? (
+                            <span className="inline-flex items-center gap-1 text-amber-600">
+                              <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold">
+                                Vale Alimentação
+                              </span>
+                              {transaction.creditCard?.name?.replace('[Vale Alimentação]', '')}
+                            </span>
+                          ) : transaction.bankAccount?.name || (
+                            transaction.paymentMethod === 'CASH' ? 'Dinheiro' : 'Débito'
+                          )}
+                        </td>
+                        <td className="px-6 py-4 text-right text-sm font-medium">
+                          <span className={
+                            transaction.paymentMethod === 'FOOD_VOUCHER' 
+                              ? 'text-amber-600 dark:text-amber-400'
+                              : transaction.amount >= 0 
+                              ? 'text-green-600 dark:text-green-400' 
+                              : 'text-red-600 dark:text-red-400'
+                          }>
+                            {transaction.type === 'INCOME' ? '+' : '-'}R$ {formatCurrency(Math.abs(transaction.amount))}
+                            {transaction.paymentMethod === 'FOOD_VOUCHER' && 
+                              <span className="ml-1 text-xs">(VA)</span>
+                            }
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-right text-sm">
+                          <Link href={`/dashboard/transactions/${transaction.id}`}>
+                            <Button variant="outline" size="sm" className="mr-2">
+                              Editar
+                            </Button>
+                          </Link>
+                          <Button 
+                            variant="destructive" 
+                            size="sm"
+                            onClick={() => {
+                              setCurrentTransaction(transaction);
+                              setShowDeleteDialog(true);
+                            }}
+                          >
+                            Excluir
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </>
                 ))
               )}
             </tbody>
           </table>
         </div>
       </div>
+      
+      {/* Diálogo de exclusão múltipla */}
+      <Dialog open={showMultiDeleteDialog} onOpenChange={setShowMultiDeleteDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Excluir Transações</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p>
+              Tem certeza que deseja excluir <strong>{selectedTransactions.size}</strong> transações?
+              Esta ação não pode ser desfeita.
+            </p>
+            {selectedTransactions.size > 0 && (
+              <div className="mt-4 max-h-40 overflow-y-auto border rounded-md p-2">
+                <p className="text-sm font-medium mb-2">Transações selecionadas:</p>
+                <ul className="text-sm space-y-1">
+                  {Array.from(selectedTransactions).map(id => {
+                    const transaction = transactions.find(t => t.id === id);
+                    return transaction ? (
+                      <li key={id} className="flex justify-between">
+                        <span className="truncate">{transaction.description}</span>
+                        <span className={transaction.type === 'INCOME' ? 'text-green-600' : 'text-red-600'}>
+                          {transaction.type === 'INCOME' ? '+' : '-'}R$ {formatCurrency(Math.abs(transaction.amount))}
+                        </span>
+                      </li>
+                    ) : null;
+                  })}
+                </ul>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setShowMultiDeleteDialog(false)}>
+              Cancelar
+            </Button>
+            <Button type="button" variant="destructive" onClick={handleDeleteMultipleTransactions} disabled={isLoading}>
+              {isLoading ? 'Excluindo...' : 'Excluir Transações'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       
       {/* Diálogo de exclusão */}
       <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>

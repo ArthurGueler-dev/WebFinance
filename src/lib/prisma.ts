@@ -9,7 +9,7 @@ const globalForPrisma = globalThis as unknown as {
 
 // Criar uma instância do PrismaClient com log detalhado
 const prismaClientSingleton = () => {
-  return new PrismaClient({
+  const client = new PrismaClient({
     datasources: {
       db: {
         url: DATABASE_URL,
@@ -17,6 +17,8 @@ const prismaClientSingleton = () => {
     },
     log: ['query', 'info', 'warn', 'error'],
   });
+  
+  return client;
 };
 
 export const prisma = globalForPrisma.prisma ?? prismaClientSingleton();

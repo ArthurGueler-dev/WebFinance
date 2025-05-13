@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import Link from 'next/link';
 import { toast } from '@/components/ui/use-toast';
+import CategorySelector from '@/components/category-selector';
 import { 
   Dialog, 
   DialogContent, 
@@ -33,6 +34,7 @@ interface CreditCard {
   name: string;
   limit: number;
   availableLimit: number;
+  cardType: 'CREDIT' | 'DEBIT' | 'FOOD_VOUCHER';
 }
 
 export default function NewTransaction() {
@@ -43,8 +45,21 @@ export default function NewTransaction() {
   const [creditCards, setCreditCards] = useState<CreditCard[]>([]);
   const [showAccountDialog, setShowAccountDialog] = useState(false);
 
-  // Form state
-  const [transaction, setTransaction] = useState({
+  // Define o estado inicial para o formulário
+  interface TransactionForm {
+    description: string;
+    amount: string;
+    date: string;
+    categoryId: string;
+    type: 'INCOME' | 'EXPENSE';
+    paymentMethod: 'CASH' | 'DEBIT' | 'CREDIT' | 'FOOD_VOUCHER';
+    bankAccountId: string;
+    creditCardId: string;
+    recurrenceType: 'SINGLE' | 'INSTALLMENT' | 'RECURRING';
+    installments: string;
+  }
+
+  const [transaction, setTransaction] = useState<TransactionForm>({
     description: '',
     amount: '',
     date: new Date().toISOString().split('T')[0],
@@ -150,30 +165,95 @@ export default function NewTransaction() {
         [name]: value,
         type: category?.type || transaction.type,
       });
-    } else if (name === 'paymentMethod') {
-      // Limpar o ID do cartão ou conta dependendo do método de pagamento
-      if (value === 'CREDIT') {
+    } else if (name === 'type') {
+      // Quando mudar o tipo para receita, ajustar as opções automaticamente
+      if (value === 'INCOME') {
+        // Para receitas, usar preferencialmente conta bancária
         setTransaction({
           ...transaction,
-          paymentMethod: value,
-          bankAccountId: '', // Limpar conta bancária se método for crédito
-          creditCardId: creditCards.length > 0 ? creditCards[0].id : '', // Definir primeiro cartão
+          type: value,
+          paymentMethod: 'DEBIT', // Padrão para receitas
+          creditCardId: '',
+          bankAccountId: bankAccounts.length > 0 ? bankAccounts[0].id : '',
         });
-      } else if (value === 'FOOD_VOUCHER') {
-        // Para vale alimentação, não precisamos de conta ou cartão
+      } else {
+        setTransaction({
+          ...transaction,
+          type: value,
+        });
+      }
+    } else if (name === 'paymentMethod') {
+      // Tratar receitas de forma especial
+      if (transaction.type === 'INCOME') {
+        // Para receitas, sempre direcionar para conta bancária
         setTransaction({
           ...transaction,
           paymentMethod: value,
           creditCardId: '',
+          bankAccountId: bankAccounts.length > 0 ? bankAccounts[0].id : '',
+        });
+        
+        // Mostrar diálogo se não houver contas bancárias
+        if (bankAccounts.length === 0) {
+          setShowAccountDialog(true);
+        }
+      } else if (value === 'CREDIT') {
+        // Filtrar apenas cartões de CRÉDITO
+        const creditOnlyCards = creditCards.filter(card => card.cardType === 'CREDIT');
+        setTransaction({
+          ...transaction,
+          paymentMethod: value,
+          bankAccountId: '', // Limpar conta bancária se método for crédito
+          creditCardId: creditOnlyCards.length > 0 ? creditOnlyCards[0].id : '', // Definir primeiro cartão de crédito
+        });
+      } else if (value === 'DEBIT') {
+        // Para despesas, verificar se há cartões de débito
+        // Para receitas, ir direto para contas bancárias
+        if (transaction.type === 'EXPENSE') {
+          const debitOnlyCards = creditCards.filter(card => card.cardType === 'DEBIT');
+          
+          if (debitOnlyCards.length > 0) {
+            setTransaction({
+              ...transaction,
+              paymentMethod: value,
+              creditCardId: debitOnlyCards[0].id,
+              bankAccountId: '', 
+            });
+          } else {
+            // Se não houver cartão de débito, usar conta bancária
+            setTransaction({
+              ...transaction,
+              paymentMethod: value,
+              creditCardId: '', 
+              bankAccountId: bankAccounts.length > 0 ? bankAccounts[0].id : '',
+            });
+          }
+        } else {
+          // Para receitas (INCOME), sempre usar conta bancária
+          setTransaction({
+            ...transaction,
+            paymentMethod: value,
+            creditCardId: '',
+            bankAccountId: bankAccounts.length > 0 ? bankAccounts[0].id : '',
+          });
+        }
+      } else if (value === 'FOOD_VOUCHER') {
+        // Filtrar apenas cartões de VALE ALIMENTAÇÃO
+        const foodVoucherCards = creditCards.filter(card => card.cardType === 'FOOD_VOUCHER');
+        
+        setTransaction({
+          ...transaction,
+          paymentMethod: value,
+          creditCardId: foodVoucherCards.length > 0 ? foodVoucherCards[0].id : '',
           bankAccountId: '',
-          type: 'EXPENSE',  // Vale alimentação é sempre despesa
+          type: 'EXPENSE' as 'EXPENSE',  // Vale alimentação é sempre despesa
         });
         
         // Pré-selecionar uma categoria de alimentação, se existir
         const foodCategory = categories.find(c => 
           (c.name.toLowerCase().includes('aliment') || 
-           c.name.toLowerCase().includes('comida') ||
-           c.name.toLowerCase().includes('refeic')) && 
+            c.name.toLowerCase().includes('comida') ||
+            c.name.toLowerCase().includes('refeic')) && 
           c.type === 'EXPENSE'
         );
         
@@ -184,15 +264,16 @@ export default function NewTransaction() {
           }));
         }
       } else {
+        // Para CASH ou outros métodos
         // Se não houver contas bancárias e o método não for crédito ou vale alimentação, mostrar pop-up
-        if (bankAccounts.length === 0 && value !== 'FOOD_VOUCHER') {
+        if (bankAccounts.length === 0) {
           setShowAccountDialog(true);
         }
         
         setTransaction({
           ...transaction,
           paymentMethod: value,
-          creditCardId: '', // Limpar cartão de crédito se método não for crédito
+          creditCardId: '', // Limpar cartão de crédito
           bankAccountId: bankAccounts.length > 0 ? bankAccounts[0].id : '', // Definir primeira conta
         });
       }
@@ -361,61 +442,21 @@ export default function NewTransaction() {
                 <label htmlFor="categoryId" className="text-sm font-medium leading-none">
                   Categoria
                 </label>
-                <div className="grid gap-2 mt-2">
-                  <div className="flex items-center space-x-2">
-                    <select
-                      id="categoryId"
-                      name="categoryId"
-                      value={transaction.categoryId}
-                      onChange={handleChange}
-                      required
-                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                    >
-                      <option value="">Selecione uma categoria</option>
-                      <optgroup label="Despesas">
-                        {categories
-                          .filter((category) => category.type === 'EXPENSE')
-                          .map((category) => (
-                            <option key={category.id} value={category.id}>
-                              {category.icon && `${category.icon} `}{category.name}
-                            </option>
-                          ))}
-                      </optgroup>
-                      <optgroup label="Receitas">
-                        {categories
-                          .filter((category) => category.type === 'INCOME')
-                          .map((category) => (
-                            <option key={category.id} value={category.id}>
-                              {category.icon && `${category.icon} `}{category.name}
-                            </option>
-                          ))}
-                      </optgroup>
-                    </select>
-                  </div>
-                  
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 mt-2 max-h-48 overflow-y-auto py-2 px-1 border rounded-md">
-                    {categories
-                      .filter((category) => category.type === transaction.type)
-                      .map((category) => (
-                        <div 
-                          key={category.id}
-                          onClick={() => setTransaction({...transaction, categoryId: category.id})}
-                          className={`flex items-center p-2 rounded-md cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors ${
-                            transaction.categoryId === category.id 
-                              ? 'ring-2 ring-primary bg-primary/10' 
-                              : ''
-                          }`}
-                          style={{
-                            borderLeft: `4px solid ${category.color}`
-                          }}
-                        >
-                          <div className="flex items-center space-x-2">
-                            <span className="text-xl">{category.icon}</span>
-                            <span className="text-sm font-medium truncate">{category.name}</span>
-                          </div>
-                        </div>
-                      ))}
-                  </div>
+                <div className="mt-2">
+                  <CategorySelector 
+                    categories={categories}
+                    selectedCategoryId={transaction.categoryId}
+                    onChange={(categoryId) => {
+                      const category = categories.find(c => c.id === categoryId);
+                      setTransaction({
+                        ...transaction,
+                        categoryId,
+                        // Atualizar o tipo de transação baseado na categoria selecionada
+                        type: category?.type || transaction.type
+                      });
+                    }}
+                    filterByType={transaction.type}
+                  />
                   
                   {categories.length === 0 && (
                     <p className="text-xs text-red-500 mt-1">
@@ -458,20 +499,145 @@ export default function NewTransaction() {
                   <option value="FOOD_VOUCHER">Vale Alimentação</option>
                 </select>
               </div>
-              {transaction.paymentMethod !== 'CREDIT' && transaction.paymentMethod !== 'FOOD_VOUCHER' ? (
+              {transaction.paymentMethod === 'CREDIT' ? (
+                <div className="space-y-2">
+                  <label htmlFor="creditCardId" className="text-sm font-medium leading-none">
+                    Cartão de Crédito
+                  </label>
+                  <select
+                    id="creditCardId"
+                    name="creditCardId"
+                    value={transaction.creditCardId || ''}
+                    onChange={handleChange}
+                    required={transaction.paymentMethod === 'CREDIT'}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  >
+                    <option value="">Selecione um cartão</option>
+                    {creditCards
+                      .filter(card => card.cardType === 'CREDIT')
+                      .map((card) => (
+                        <option key={card.id} value={card.id}>
+                          {card.name} (Disponível: R$ {card.availableLimit.toFixed(2)})
+                        </option>
+                      ))}
+                  </select>
+                  {creditCards.filter(card => card.cardType === 'CREDIT').length === 0 && (
+                    <p className="text-xs text-red-500 mt-1">
+                      Nenhum cartão de crédito cadastrado. Cadastre um cartão para utilizar esta opção.
+                    </p>
+                  )}
+                  {creditCards.filter(card => card.cardType === 'CREDIT').length > 0 && (
+                    <p className="text-xs text-emerald-600 mt-1 flex items-center gap-1">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
+                      </svg>
+                      O limite disponível será atualizado automaticamente após o registro desta transação
+                    </p>
+                  )}
+                </div>
+              ) : transaction.paymentMethod === 'DEBIT' && transaction.type === 'EXPENSE' ? (
+                <div className="space-y-2">
+                  {creditCards.filter(card => card.cardType === 'DEBIT').length > 0 ? (
+                    <>
+                      <label htmlFor="debitCardId" className="text-sm font-medium leading-none">
+                        Cartão de Débito
+                      </label>
+                      <select
+                        id="debitCardId"
+                        name="creditCardId" // Usamos o mesmo campo de creditCardId para simplicidade
+                        value={transaction.creditCardId || ''}
+                        onChange={handleChange}
+                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      >
+                        <option value="">Selecione um cartão</option>
+                        {creditCards
+                          .filter(card => card.cardType === 'DEBIT')
+                          .map((card) => (
+                            <option key={card.id} value={card.id}>
+                              {card.name}
+                            </option>
+                          ))}
+                      </select>
+                    </>
+                  ) : (
+                    <div>
+                      <label htmlFor="bankAccountId" className="text-sm font-medium leading-none">
+                        Conta Bancária
+                      </label>
+                      <select
+                        id="bankAccountId"
+                        name="bankAccountId"
+                        value={transaction.bankAccountId || ''}
+                        onChange={handleChange}
+                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      >
+                        <option value="">Selecione uma conta</option>
+                        {bankAccounts.map((account) => (
+                          <option key={account.id} value={account.id}>
+                            {account.name} (R$ {account.currentBalance.toFixed(2)})
+                          </option>
+                        ))}
+                      </select>
+                      {bankAccounts.length === 0 && (
+                        <div className="flex items-center mt-1">
+                          <p className="text-xs text-amber-500">
+                            Nenhuma conta cadastrada. Cadastre uma conta bancária primeiro.
+                          </p>
+                          <Button 
+                            type="button" 
+                            variant="link" 
+                            className="text-xs px-2 py-0 h-auto" 
+                            onClick={() => router.push('/dashboard/accounts')}
+                          >
+                            Cadastrar conta
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : transaction.paymentMethod === 'FOOD_VOUCHER' ? (
+                <div className="space-y-2">
+                  <label htmlFor="foodVoucherId" className="text-sm font-medium leading-none">
+                    Cartão Vale Alimentação
+                  </label>
+                  <select
+                    id="foodVoucherId"
+                    name="creditCardId" // Usamos o mesmo campo de creditCardId para simplicidade
+                    value={transaction.creditCardId || ''}
+                    onChange={handleChange}
+                    required={transaction.paymentMethod === 'FOOD_VOUCHER'}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  >
+                    <option value="">Selecione um cartão</option>
+                    {creditCards
+                      .filter(card => card.cardType === 'FOOD_VOUCHER')
+                      .map((card) => (
+                        <option key={card.id} value={card.id}>
+                          {card.name}
+                        </option>
+                      ))}
+                  </select>
+                  {creditCards.filter(card => card.cardType === 'FOOD_VOUCHER').length === 0 && (
+                    <p className="text-xs text-red-500 mt-1">
+                      Nenhum cartão de vale alimentação cadastrado. Cadastre um primeiro.
+                    </p>
+                  )}
+                </div>
+              ) : (
                 <div className="space-y-2">
                   <label htmlFor="bankAccountId" className="text-sm font-medium leading-none">
-                    Conta Bancária
+                    {transaction.type === 'INCOME' ? 'Conta para Depósito' : 'Conta Bancária'}
                   </label>
                   <select
                     id="bankAccountId"
                     name="bankAccountId"
-                    value={transaction.bankAccountId}
+                    value={transaction.bankAccountId || ''}
                     onChange={handleChange}
-                    required={false}
+                    required={transaction.type === 'INCOME'}
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   >
-                    <option value="">Selecione uma conta (opcional)</option>
+                    <option value="">Selecione uma conta{transaction.type === 'INCOME' ? '' : ' (opcional)'}</option>
                     {bankAccounts.map((account) => (
                       <option key={account.id} value={account.id}>
                         {account.name} (R$ {account.currentBalance.toFixed(2)})
@@ -480,8 +646,10 @@ export default function NewTransaction() {
                   </select>
                   {bankAccounts.length === 0 && (
                     <div className="flex items-center mt-1">
-                      <p className="text-xs text-amber-500">
-                        Nenhuma conta cadastrada. A transação será registrada sem afetar saldos.
+                      <p className="text-xs text-red-500">
+                        {transaction.type === 'INCOME' 
+                          ? 'Você precisa cadastrar uma conta bancária para registrar receitas.' 
+                          : 'Nenhuma conta cadastrada. A transação será registrada sem afetar saldos.'}
                       </p>
                       <Button 
                         type="button" 
@@ -493,36 +661,14 @@ export default function NewTransaction() {
                       </Button>
                     </div>
                   )}
-                </div>
-              ) : transaction.paymentMethod === 'CREDIT' ? (
-                <div className="space-y-2">
-                  <label htmlFor="creditCardId" className="text-sm font-medium leading-none">
-                    Cartão de Crédito
-                  </label>
-                  <select
-                    id="creditCardId"
-                    name="creditCardId"
-                    value={transaction.creditCardId}
-                    onChange={handleChange}
-                    required={transaction.paymentMethod === 'CREDIT'}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                  >
-                    <option value="">Selecione um cartão</option>
-                    {creditCards.map((card) => (
-                      <option key={card.id} value={card.id}>
-                        {card.name} (Disponível: R$ {card.availableLimit.toFixed(2)})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <label className="text-sm font-medium leading-none">
-                    Vale Alimentação
-                  </label>
-                  <div className="flex h-10 items-center px-3 py-2 rounded-md border border-input bg-muted/50">
-                    <span className="text-sm text-muted-foreground">Transação com Vale Alimentação</span>
-                  </div>
+                  {transaction.type === 'INCOME' && bankAccounts.length > 0 && (
+                    <p className="text-xs text-emerald-600 mt-1 flex items-center gap-1">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
+                      </svg>
+                      O saldo da conta será atualizado automaticamente após o registro
+                    </p>
+                  )}
                 </div>
               )}
               <div className="space-y-2">

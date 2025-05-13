@@ -1,9 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { prisma } from '@/lib/prisma';
+// Importar as funções do db-fix
+import { getTransactions, getCreditCards } from '@/lib/db-fix';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
+import { RecurrenceType, TransactionType } from '@prisma/client';
 
-// GET - Lista de transações
+// GET - Listar transações
 export async function GET(request: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -15,49 +18,66 @@ export async function GET(request: Request) {
       );
     }
     
-    // Obter parâmetros de consulta 
     const { searchParams } = new URL(request.url);
-    const creditCardId = searchParams.get('creditCardId');
-    const type = searchParams.get('type');
-    const bankAccountId = searchParams.get('bankAccountId');
-    const paymentMethod = searchParams.get('paymentMethod');
+    const description = searchParams.get('description');
+    const categoryId = searchParams.get('categoryId');
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
+    const creditCardId = searchParams.get('creditCardId');
     
-    // Construir filtros
-    const filters: any = {
-      userId: session.user.id,
-    };
+    // Usar a função getTransactions do db-fix em vez do acesso direto ao Prisma
+    const options: any = {};
     
-    // Adicionar filtros opcionais se fornecidos
-    if (creditCardId) filters.creditCardId = creditCardId;
-    if (type) filters.type = type;
-    if (bankAccountId) filters.bankAccountId = bankAccountId;
-    if (paymentMethod) filters.paymentMethod = paymentMethod;
-    
-    // Filtros de data
-    if (startDate || endDate) {
-      filters.date = {};
-      if (startDate) filters.date.gte = new Date(startDate);
-      if (endDate) filters.date.lte = new Date(endDate);
+    if (categoryId) {
+      options.categoryId = categoryId;
     }
     
-    // Buscar transações com filtros
-    const transactions = await prisma.transaction.findMany({
-      where: filters,
-      include: {
-        category: true,
-        bankAccount: true,
-        creditCard: true,
+    if (creditCardId) {
+      options.creditCardId = creditCardId;
+    }
+    
+    if (startDate) {
+      options.startDate = new Date(startDate);
+    }
+    
+    if (endDate) {
+      options.endDate = new Date(endDate);
+    }
+    
+    // Buscar transações usando a função adaptada do db-fix
+    let transactions = await getTransactions(session.user.id, options);
+    
+    // Filtrar por descrição (já que não temos essa opção na função getTransactions)
+    if (description) {
+      transactions = transactions.filter(t => 
+        t.description.toLowerCase().includes(description.toLowerCase())
+      );
+    }
+    
+    // Verificar quais são transações de vale alimentação
+    const transactionsJson = JSON.parse(JSON.stringify(transactions));
+    
+    // Buscar cartões de vale alimentação
+    const foodVoucherCards = await prisma.creditCard.findMany({
+      where: {
+        userId: session.user.id,
+        name: { contains: '[Vale Alimentação]' }
       },
-      orderBy: {
-        date: 'desc',
-      },
+      select: { id: true }
     });
     
-    return NextResponse.json(transactions);
+    const foodVoucherCardIds = new Set(foodVoucherCards.map(card => card.id));
+    
+    // Converter transações DEBIT com cartão de vale alimentação para FOOD_VOUCHER
+    transactionsJson.forEach((transaction: any) => {
+      if (transaction.paymentMethod === 'DEBIT' && transaction.creditCardId && foodVoucherCardIds.has(transaction.creditCardId)) {
+        transaction.paymentMethod = 'FOOD_VOUCHER';
+      }
+    });
+    
+    return NextResponse.json(transactionsJson);
   } catch (error) {
-    console.error('Erro ao buscar transações:', error);
+    console.error('Erro ao listar transações:', error);
     return NextResponse.json(
       { error: 'Erro ao processar a requisição' },
       { status: 500 }
@@ -65,7 +85,7 @@ export async function GET(request: Request) {
   }
 }
 
-// POST - Criar uma nova transação
+// POST - Criar transação
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -78,88 +98,144 @@ export async function POST(request: Request) {
     }
     
     const data = await request.json();
-    const { 
-      description, 
-      amount, 
-      date, 
-      type, 
-      paymentMethod, 
-      categoryId, 
-      bankAccountId, 
-      creditCardId,
-      recurrenceType,
-      installments
-    } = data;
     
-    // Validar campos obrigatórios
-    if (!description || amount === undefined || !date || !type || !paymentMethod || !categoryId) {
-      return NextResponse.json(
-        { error: 'Campos obrigatórios não informados' },
-        { status: 400 }
-      );
+    // Salvar o paymentMethod original antes de converter
+    const originalPaymentMethod = data.paymentMethod;
+    
+    // Converter FOOD_VOUCHER para um valor de enum aceito (DEBIT como alternativa)
+    let paymentMethod = data.paymentMethod;
+    if (paymentMethod === 'FOOD_VOUCHER') {
+      paymentMethod = 'DEBIT';
+      console.log("Convertendo FOOD_VOUCHER para DEBIT temporariamente");
     }
     
-    // Verificar se a conta ou cartão de crédito existe
-    if (paymentMethod === 'CREDIT' && !creditCardId) {
-      return NextResponse.json(
-        { error: 'Cartão de crédito é obrigatório para pagamentos com cartão de crédito' },
-        { status: 400 }
-      );
-    }
+    let transaction;
     
-    // Criar a transação
-    const transaction = await prisma.transaction.create({
-      data: {
-        description,
-        amount: type === 'EXPENSE' ? Math.abs(parseFloat(amount)) : parseFloat(amount),
-        date: new Date(date),
-        type,
-        paymentMethod,
-        recurrenceType: recurrenceType || 'SINGLE',
-        installments: installments || null,
-        currentInstallment: installments ? 1 : null,
-        categoryId,
-        bankAccountId: bankAccountId || null,
-        creditCardId: creditCardId || null,
-        userId: session.user.id,
-      },
-      include: {
-        category: true,
-        bankAccount: true,
-        creditCard: true,
-      },
-    });
-    
-    // Se for despesa e pagamento não for cartão de crédito, atualizar saldo da conta
-    if (type === 'EXPENSE' && paymentMethod !== 'CREDIT' && bankAccountId) {
-      await prisma.bankAccount.update({
-        where: { id: bankAccountId },
+    // Se for uma transação parcelada, criar múltiplas transações
+    if (data.recurrenceType === 'INSTALLMENT' && data.installments > 1) {
+      const installmentAmount = Math.round((data.amount / data.installments) * 100) / 100;
+      
+      // Criar transações para cada parcela
+      const transactionPromises = [];
+      
+      for (let i = 1; i <= data.installments; i++) {
+        const installmentDate = new Date(data.date);
+        installmentDate.setMonth(installmentDate.getMonth() + i - 1);
+        
+        transactionPromises.push(
+          prisma.transaction.create({
+            data: {
+              description: `${data.description} (${i}/${data.installments})`,
+              amount: installmentAmount,
+              date: installmentDate,
+              type: data.type as TransactionType,
+              paymentMethod: paymentMethod,
+              categoryId: data.categoryId,
+              bankAccountId: data.bankAccountId,
+              creditCardId: data.creditCardId,
+              recurrenceType: 'INSTALLMENT' as RecurrenceType,
+              installments: data.installments,
+              currentInstallment: i,
+              userId: session.user.id,
+            },
+          })
+        );
+      }
+      
+      await Promise.all(transactionPromises);
+      
+      // Obter a primeira transação para a resposta
+      transaction = await prisma.transaction.findFirst({
+        where: {
+          userId: session.user.id,
+          description: `${data.description} (1/${data.installments})`,
+          recurrenceType: 'INSTALLMENT',
+          installments: data.installments,
+          currentInstallment: 1,
+        },
+        include: {
+          category: true,
+          bankAccount: true,
+          creditCard: true,
+        },
+      });
+    } else {
+      // Transação única ou recorrente
+      transaction = await prisma.transaction.create({
         data: {
-          currentBalance: {
-            decrement: Math.abs(parseFloat(amount)),
-          },
+          description: data.description,
+          amount: data.amount,
+          date: new Date(data.date),
+          type: data.type as TransactionType,
+          paymentMethod: paymentMethod,
+          categoryId: data.categoryId,
+          bankAccountId: data.bankAccountId,
+          creditCardId: data.creditCardId,
+          recurrenceType: data.recurrenceType as RecurrenceType,
+          installments: data.recurrenceType === 'INSTALLMENT' ? data.installments : null,
+          currentInstallment: data.recurrenceType === 'INSTALLMENT' ? 1 : null,
+          userId: session.user.id,
+        },
+        include: {
+          category: true,
+          bankAccount: true,
+          creditCard: true,
         },
       });
     }
     
-    // Se for receita, atualizar saldo da conta
-    if (type === 'INCOME' && bankAccountId) {
-      await prisma.bankAccount.update({
-        where: { id: bankAccountId },
-        data: {
-          currentBalance: {
-            increment: Math.abs(parseFloat(amount)),
-          },
-        },
-      });
+    // Restaurar FOOD_VOUCHER na resposta
+    const responseTransaction = {
+      ...JSON.parse(JSON.stringify(transaction)),
+      paymentMethod: originalPaymentMethod
+    };
+    
+    // Atualizar o saldo da conta bancária se informada
+    if (data.bankAccountId) {
+      await updateBankAccountBalance(data.bankAccountId);
     }
     
-    return NextResponse.json(transaction);
+    return NextResponse.json(responseTransaction);
   } catch (error) {
     console.error('Erro ao criar transação:', error);
     return NextResponse.json(
-      { error: 'Erro ao criar transação' },
+      { error: 'Erro ao processar a requisição' },
       { status: 500 }
     );
   }
+}
+
+// Função para atualizar o saldo da conta bancária
+async function updateBankAccountBalance(accountId: string) {
+  // Buscar todas as transações relacionadas à conta
+  const transactions = await prisma.transaction.findMany({
+    where: {
+      bankAccountId: accountId,
+    },
+  });
+  
+  // Obter a conta bancária
+  const account = await prisma.bankAccount.findUnique({
+    where: {
+      id: accountId,
+    },
+  });
+  
+  if (!account) return;
+  
+  // Calcular o novo saldo atual (saldo inicial + soma das transações)
+  const transactionsSum = transactions.reduce(
+    (sum, t) => sum + t.amount,
+    0
+  );
+  
+  // Atualizar o saldo atual da conta
+  await prisma.bankAccount.update({
+    where: {
+      id: accountId,
+    },
+    data: {
+      currentBalance: account.initialBalance + transactionsSum,
+    },
+  });
 } 

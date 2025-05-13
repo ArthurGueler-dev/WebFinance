@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { prisma } from '@/lib/prisma';
+// Importar as funções do db-fix
+import { getTransactions } from '@/lib/db-fix';
 import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { RecurrenceType, TransactionType } from '@prisma/client';
 
-// GET - Obter transação por ID
+// GET - Obter transação específica
 export async function GET(
   request: Request,
   { params }: { params: { id: string } }
@@ -21,17 +23,11 @@ export async function GET(
     
     const { id } = params;
     
-    const transaction = await prisma.transaction.findUnique({
-      where: {
-        id,
-        userId: session.user.id,
-      },
-      include: {
-        category: true,
-        bankAccount: true,
-        creditCard: true,
-      },
-    });
+    // Buscar todas as transações do usuário
+    const transactions = await getTransactions(session.user.id);
+    
+    // Filtrar a transação específica pelo ID
+    const transaction = transactions.find(t => t.id === id);
     
     if (!transaction) {
       return NextResponse.json(
@@ -40,7 +36,24 @@ export async function GET(
       );
     }
     
-    return NextResponse.json(transaction);
+    // Converter para JSON para poder modificar livremente
+    const transactionJson = JSON.parse(JSON.stringify(transaction));
+    
+    // Verificar se é um vale alimentação
+    if (transactionJson.creditCardId && transactionJson.paymentMethod === 'DEBIT') {
+      // Buscar o cartão para verificar se é um vale alimentação
+      const card = await prisma.creditCard.findUnique({
+        where: {
+          id: transactionJson.creditCardId
+        }
+      });
+      
+      if (card && card.name.includes('[Vale Alimentação]')) {
+        transactionJson.paymentMethod = 'FOOD_VOUCHER';
+      }
+    }
+    
+    return NextResponse.json(transactionJson);
   } catch (error) {
     console.error('Erro ao buscar transação:', error);
     return NextResponse.json(
@@ -74,6 +87,9 @@ export async function PUT(
         id,
         userId: session.user.id,
       },
+      include: {
+        creditCard: true
+      }
     });
     
     if (!existingTransaction) {
@@ -88,6 +104,33 @@ export async function PUT(
       existingTransaction.recurrenceType === 'RECURRING' || 
       existingTransaction.recurrenceType === 'INSTALLMENT';
     
+    // Salvar o paymentMethod original antes de converter
+    const originalPaymentMethod = data.paymentMethod;
+    
+    // Converter FOOD_VOUCHER para um valor de enum aceito (DEBIT como alternativa)
+    let paymentMethod = data.paymentMethod;
+    if (paymentMethod === 'FOOD_VOUCHER') {
+      paymentMethod = 'DEBIT';
+      console.log("Convertendo FOOD_VOUCHER para DEBIT temporariamente");
+    }
+    
+    // Verificar se o cartão é de Vale Alimentação
+    let isCardFoodVoucher = false;
+    if (data.creditCardId) {
+      const card = await prisma.creditCard.findUnique({
+        where: { id: data.creditCardId }
+      });
+      
+      if (card && card.name.includes('[Vale Alimentação]')) {
+        isCardFoodVoucher = true;
+      }
+    }
+    
+    // Verificar se é uma transação de vale alimentação que não estava configurada como FOOD_VOUCHER
+    if (isCardFoodVoucher && paymentMethod !== 'DEBIT') {
+      paymentMethod = 'DEBIT'; // Forçar DEBIT para cartões de vale alimentação
+    }
+    
     // Atualizar a transação
     const updatedTransaction = await prisma.transaction.update({
       where: {
@@ -98,12 +141,13 @@ export async function PUT(
         amount: data.amount,
         date: new Date(data.date),
         type: data.type as TransactionType,
-        paymentMethod: data.paymentMethod,
+        paymentMethod: paymentMethod,
         categoryId: data.categoryId,
         bankAccountId: data.bankAccountId,
         creditCardId: data.creditCardId,
         recurrenceType: data.recurrenceType as RecurrenceType,
         installments: data.installments,
+        currentInstallment: data.currentInstallment,
       },
       include: {
         category: true,
@@ -111,6 +155,12 @@ export async function PUT(
         creditCard: true,
       },
     });
+    
+    // Adicionar o valor FOOD_VOUCHER de volta na resposta
+    const responseTransaction = {
+      ...updatedTransaction,
+      paymentMethod: originalPaymentMethod
+    };
     
     // Atualizar o saldo da conta bancária
     if (data.bankAccountId) {
@@ -138,7 +188,7 @@ export async function PUT(
       await updateCreditCardLimit(existingTransaction.creditCardId);
     }
     
-    return NextResponse.json(updatedTransaction);
+    return NextResponse.json(responseTransaction);
   } catch (error) {
     console.error('Erro ao atualizar transação:', error);
     return NextResponse.json(
@@ -214,6 +264,9 @@ async function updateBankAccountBalance(accountId: string) {
     where: {
       bankAccountId: accountId,
     },
+    include: {
+      creditCard: true
+    }
   });
   
   // Obter a conta bancária
@@ -224,12 +277,21 @@ async function updateBankAccountBalance(accountId: string) {
   });
   
   if (!account) return;
-  
-  // Calcular o novo saldo atual (saldo inicial + soma das transações)
-  const transactionsSum = transactions.reduce(
-    (sum, t) => sum + t.amount,
-    0
-  );
+
+  // Calcular o novo saldo atual (saldo inicial + soma das transações, excluindo vale alimentação)
+  const transactionsSum = transactions.reduce((sum, t) => {
+    // Verificar se é uma transação de vale alimentação
+    const isFoodVoucher = 
+      t.creditCard && 
+      t.creditCard.name.includes('[Vale Alimentação]');
+    
+    // Se for vale alimentação, não considerar no saldo
+    if (isFoodVoucher) {
+      return sum;
+    }
+    
+    return sum + t.amount;
+  }, 0);
   
   // Atualizar o saldo atual da conta
   await prisma.bankAccount.update({
@@ -245,15 +307,7 @@ async function updateBankAccountBalance(accountId: string) {
 // Função para atualizar o limite disponível do cartão de crédito
 async function updateCreditCardLimit(cardId: string) {
   try {
-    // Buscar todas as transações de despesa relacionadas ao cartão do mês atual
-    const transactions = await prisma.transaction.findMany({
-      where: {
-        creditCardId: cardId,
-        type: 'EXPENSE',
-      },
-    });
-    
-    // Obter o cartão de crédito
+    // Buscar o cartão para verificar seu tipo
     const card = await prisma.creditCard.findUnique({
       where: {
         id: cardId,
@@ -261,6 +315,17 @@ async function updateCreditCardLimit(cardId: string) {
     });
     
     if (!card) return;
+
+    // Verificar se é um cartão de vale alimentação
+    const isVoucherCard = card.name.includes('[Vale Alimentação]');
+    
+    // Buscar todas as transações de despesa relacionadas ao cartão
+    const transactions = await prisma.transaction.findMany({
+      where: {
+        creditCardId: cardId,
+        type: 'EXPENSE',
+      },
+    });
     
     // Calcular o total de despesas do cartão (valor positivo)
     const expensesSum = transactions.reduce(
@@ -268,9 +333,15 @@ async function updateCreditCardLimit(cardId: string) {
       0
     );
     
-    // Como não temos o campo availableLimit no modelo, podemos apenas
-    // registrar um log da informação ou adicionar como metadado na resposta
-    console.log(`Cartão ${card.name}: Limite total R$ ${card.limit.toFixed(2)}, Gastos: R$ ${expensesSum.toFixed(2)}, Disponível: R$ ${Math.max(0, card.limit - expensesSum).toFixed(2)}`);
+    // Calcular limite disponível
+    const availableLimit = Math.max(0, card.limit - expensesSum);
+    
+    // Registrar o limite disponível para o tipo correto de cartão
+    if (isVoucherCard) {
+      console.log(`Vale Alimentação ${card.name}: Limite total R$ ${card.limit.toFixed(2)}, Gastos: R$ ${expensesSum.toFixed(2)}, Disponível: R$ ${availableLimit.toFixed(2)}`);
+    } else {
+      console.log(`Cartão ${card.name}: Limite total R$ ${card.limit.toFixed(2)}, Gastos: R$ ${expensesSum.toFixed(2)}, Disponível: R$ ${availableLimit.toFixed(2)}`);
+    }
     
     // Não atualizamos o cartão porque não há um campo para armazenar o limite disponível
   } catch (error) {

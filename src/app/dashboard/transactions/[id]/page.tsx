@@ -33,6 +33,7 @@ interface CreditCard {
   name: string;
   limit: number;
   availableLimit: number;
+  cardType: 'CREDIT' | 'DEBIT' | 'FOOD_VOUCHER';
 }
 
 interface Transaction {
@@ -183,7 +184,7 @@ export default function EditTransaction({ params }: { params: { id: string } }) 
       if (value === 'CREDIT') {
         setTransaction({
           ...transaction,
-          paymentMethod: value,
+          paymentMethod: value as 'CREDIT' | 'DEBIT' | 'CASH' | 'FOOD_VOUCHER',
           bankAccountId: '', // Limpar conta bancária se método for crédito
           creditCardId: creditCards.length > 0 ? creditCards[0].id : '', // Definir primeiro cartão
         });
@@ -191,7 +192,7 @@ export default function EditTransaction({ params }: { params: { id: string } }) 
         // Para vale alimentação, não precisamos de conta ou cartão
         setTransaction({
           ...transaction,
-          paymentMethod: value,
+          paymentMethod: value as 'CREDIT' | 'DEBIT' | 'CASH' | 'FOOD_VOUCHER',
           creditCardId: '',
           bankAccountId: '',
           type: 'EXPENSE',  // Vale alimentação é sempre despesa
@@ -219,7 +220,7 @@ export default function EditTransaction({ params }: { params: { id: string } }) 
         
         setTransaction({
           ...transaction,
-          paymentMethod: value,
+          paymentMethod: value as 'CREDIT' | 'DEBIT' | 'CASH' | 'FOOD_VOUCHER',
           creditCardId: '', // Limpar cartão de crédito se método não for crédito
           bankAccountId: bankAccounts.length > 0 ? bankAccounts[0].id : '', // Definir primeira conta
         });
@@ -273,6 +274,7 @@ export default function EditTransaction({ params }: { params: { id: string } }) 
         installments: transaction.recurrenceType === 'INSTALLMENT' 
           ? transaction.installments 
           : null,
+        currentInstallment: transaction.currentInstallment || null,
       };
       
       // Enviar para a API
@@ -502,7 +504,107 @@ export default function EditTransaction({ params }: { params: { id: string } }) 
                   <option value="FOOD_VOUCHER">Vale Alimentação</option>
                 </select>
               </div>
-              {transaction.paymentMethod !== 'CREDIT' && transaction.paymentMethod !== 'FOOD_VOUCHER' ? (
+              {transaction.paymentMethod === 'CREDIT' ? (
+                <div className="space-y-2">
+                  <label htmlFor="creditCardId" className="text-sm font-medium leading-none">
+                    Cartão de Crédito
+                  </label>
+                  <select
+                    id="creditCardId"
+                    name="creditCardId"
+                    value={transaction.creditCardId || ''}
+                    onChange={handleChange}
+                    required={transaction.paymentMethod === 'CREDIT'}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  >
+                    <option value="">Selecione um cartão</option>
+                    {creditCards
+                      .filter(card => card.cardType === 'CREDIT')
+                      .map((card) => (
+                        <option key={card.id} value={card.id}>
+                          {card.name} (Disponível: R$ {card.availableLimit.toFixed(2)})
+                        </option>
+                      ))}
+                  </select>
+                  {creditCards.filter(card => card.cardType === 'CREDIT').length === 0 && (
+                    <p className="text-xs text-red-500 mt-1">
+                      Nenhum cartão de crédito cadastrado. Cadastre um cartão para utilizar esta opção.
+                    </p>
+                  )}
+                </div>
+              ) : transaction.paymentMethod === 'DEBIT' ? (
+                <div className="space-y-2">
+                  <label htmlFor="debitCardId" className="text-sm font-medium leading-none">
+                    Cartão de Débito
+                  </label>
+                  <select
+                    id="debitCardId"
+                    name="creditCardId" // Usamos o mesmo campo de creditCardId para simplicidade
+                    value={transaction.creditCardId || ''}
+                    onChange={handleChange}
+                    required={transaction.paymentMethod === 'DEBIT'}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  >
+                    <option value="">Selecione um cartão</option>
+                    {creditCards
+                      .filter(card => card.cardType === 'DEBIT')
+                      .map((card) => (
+                        <option key={card.id} value={card.id}>
+                          {card.name}
+                        </option>
+                      ))}
+                  </select>
+                  {creditCards.filter(card => card.cardType === 'DEBIT').length === 0 && (
+                    <div>
+                      <p className="text-xs text-amber-500 mt-1">
+                        Nenhum cartão de débito cadastrado. Usando conta bancária.
+                      </p>
+                      <select
+                        id="bankAccountId"
+                        name="bankAccountId"
+                        value={transaction.bankAccountId || ''}
+                        onChange={handleChange}
+                        className="mt-2 flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      >
+                        <option value="">Selecione uma conta (opcional)</option>
+                        {bankAccounts.map((account) => (
+                          <option key={account.id} value={account.id}>
+                            {account.name} (R$ {account.currentBalance.toFixed(2)})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              ) : transaction.paymentMethod === 'FOOD_VOUCHER' ? (
+                <div className="space-y-2">
+                  <label htmlFor="foodVoucherId" className="text-sm font-medium leading-none">
+                    Cartão Vale Alimentação
+                  </label>
+                  <select
+                    id="foodVoucherId"
+                    name="creditCardId" // Usamos o mesmo campo de creditCardId para simplicidade
+                    value={transaction.creditCardId || ''}
+                    onChange={handleChange}
+                    required={transaction.paymentMethod === 'FOOD_VOUCHER'}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  >
+                    <option value="">Selecione um cartão</option>
+                    {creditCards
+                      .filter(card => card.cardType === 'FOOD_VOUCHER')
+                      .map((card) => (
+                        <option key={card.id} value={card.id}>
+                          {card.name}
+                        </option>
+                      ))}
+                  </select>
+                  {creditCards.filter(card => card.cardType === 'FOOD_VOUCHER').length === 0 && (
+                    <p className="text-xs text-red-500 mt-1">
+                      Nenhum cartão de vale alimentação cadastrado. Cadastre um primeiro.
+                    </p>
+                  )}
+                </div>
+              ) : (
                 <div className="space-y-2">
                   <label htmlFor="bankAccountId" className="text-sm font-medium leading-none">
                     Conta Bancária
@@ -538,36 +640,6 @@ export default function EditTransaction({ params }: { params: { id: string } }) 
                     </div>
                   )}
                 </div>
-              ) : transaction.paymentMethod === 'CREDIT' ? (
-                <div className="space-y-2">
-                  <label htmlFor="creditCardId" className="text-sm font-medium leading-none">
-                    Cartão de Crédito
-                  </label>
-                  <select
-                    id="creditCardId"
-                    name="creditCardId"
-                    value={transaction.creditCardId || ''}
-                    onChange={handleChange}
-                    required={transaction.paymentMethod === 'CREDIT'}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                  >
-                    <option value="">Selecione um cartão</option>
-                    {creditCards.map((card) => (
-                      <option key={card.id} value={card.id}>
-                        {card.name} (Disponível: R$ {card.availableLimit.toFixed(2)})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <label className="text-sm font-medium leading-none">
-                    Vale Alimentação
-                  </label>
-                  <div className="flex h-10 items-center px-3 py-2 rounded-md border border-input bg-muted/50">
-                    <span className="text-sm text-muted-foreground">Transação com Vale Alimentação</span>
-                  </div>
-                </div>
               )}
               <div className="space-y-2">
                 <label htmlFor="recurrenceType" className="text-sm font-medium leading-none">
@@ -600,6 +672,27 @@ export default function EditTransaction({ params }: { params: { id: string } }) 
                     onChange={handleChange}
                     required={transaction.recurrenceType === 'INSTALLMENT'}
                   />
+                </div>
+              )}
+              
+              {transaction.recurrenceType === 'INSTALLMENT' && (
+                <div className="space-y-2">
+                  <label htmlFor="currentInstallment" className="text-sm font-medium leading-none">
+                    Parcelas já pagas
+                  </label>
+                  <Input
+                    id="currentInstallment"
+                    name="currentInstallment"
+                    type="number"
+                    min="0"
+                    max={transaction.installments || 48}
+                    value={transaction.currentInstallment || 0}
+                    onChange={handleChange}
+                    required={transaction.recurrenceType === 'INSTALLMENT'}
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {transaction.currentInstallment || 0} de {transaction.installments || 0} parcelas pagas
+                  </p>
                 </div>
               )}
             </div>

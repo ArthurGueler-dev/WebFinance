@@ -2,8 +2,8 @@ import nodemailer from 'nodemailer';
 
 // IMPORTANTE: Substitua estas credenciais com suas próprias!
 // Em um ambiente de produção, você deve usar variáveis de ambiente
-const EMAIL_USER = 'seu-email@gmail.com'; // Substitua pelo seu email
-const EMAIL_PASSWORD = 'sua-senha-de-app'; // Substitua pela sua senha de app
+const EMAIL_USER = 'arthurgh.priv@gmail.com'; // Substitua pelo seu email
+const EMAIL_PASSWORD = 'zpza wezg qamj wzxo'; // Substitua pela sua senha de app
 
 // Configuração do transporte de email com valores fixos
 export const emailTransporter = nodemailer.createTransport({

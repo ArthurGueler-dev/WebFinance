@@ -20,6 +20,8 @@ model User {
   accounts      Account[]
   bankAccounts  BankAccount[]
   creditCards   CreditCard[]
+  financialGoals FinancialGoal[]
+  budgets        Budget[]
   sessions      Session[]
   transactions  Transaction[]
 }
@@ -76,11 +78,47 @@ model CreditCard {
   limit        Float
   dueDay       Int
   closingDay   Int
+  cardType     CardType      @default(CREDIT)
+  color        String?
   userId       String
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
   user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   transactions Transaction[]
+}
+
+model FinancialGoal {
+  id          String    @id @default(cuid())
+  name        String
+  targetAmount Float
+  currentAmount Float    @default(0)
+  startDate   DateTime  @default(now())
+  targetDate  DateTime
+  description String?
+  color       String?
+  icon        String?
+  completed   Boolean   @default(false)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Budget {
+  id           String    @id @default(cuid())
+  categoryId   String
+  amount       Float
+  spentAmount  Float     @default(0)
+  month        Int       
+  year         Int
+  userId       String
+  alertThreshold Float   @default(80) // Porcentagem para envio de alerta (ex: 80% do orçamento)
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category     Category  @relation(fields: [categoryId], references: [id])
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([categoryId, month, year, userId])
 }
 
 model Category {
@@ -91,6 +129,7 @@ model Category {
   type         TransactionType
   createdAt    DateTime        @default(now())
   transactions Transaction[]
+  budgets      Budget[]
 }
 
 model Transaction {
@@ -131,4 +170,10 @@ enum RecurrenceType {
   SINGLE
   INSTALLMENT
   RECURRING
+}
+
+enum CardType {
+  CREDIT
+  DEBIT
+  FOOD_VOUCHER
 }

@@ -6,14 +6,18 @@ import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 // GET - Obter todas as contas bancárias do usuário
 export async function GET() {
   try {
+    console.log("API: Iniciando busca de contas bancárias");
     const session = await getServerSession(authOptions);
     
     if (!session || !session.user?.id) {
+      console.log("API: Usuário não autenticado ao buscar contas bancárias");
       return NextResponse.json(
         { error: 'Não autorizado' },
         { status: 401 }
       );
     }
+    
+    console.log("API: Usuário autenticado, buscando contas bancárias");
     
     const bankAccounts = await prisma.bankAccount.findMany({
       where: {
@@ -23,6 +27,8 @@ export async function GET() {
         name: 'asc',
       },
     });
+    
+    console.log(`API: Encontradas ${bankAccounts.length} contas bancárias`);
     
     return NextResponse.json(bankAccounts);
   } catch (error) {

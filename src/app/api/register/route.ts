@@ -4,14 +4,15 @@ import { prisma } from '@/lib/prisma';
 import crypto from 'crypto';
 import nodemailer from 'nodemailer';
 
-// Configuração Mailtrap (segura para testes)
+// Configuração SMTP direta
 const emailTransporter = nodemailer.createTransport({
-  host: "sandbox.smtp.mailtrap.io",
-  port: 2525,
+  host: 'smtp.gmail.com',
+  port: 587,
+  secure: false,
   auth: {
-    user: "seu_usuario_mailtrap", // Substitua pelo usuário fornecido pelo Mailtrap
-    pass: "sua_senha_mailtrap"    // Substitua pela senha fornecida pelo Mailtrap
-  }
+    user: 'arthurgh.priv@gmail.com', // Substitua pelo seu email
+    pass: 'zpza wezg qamj wzxo', // Substitua pela sua senha de app
+  },
 });
 
 // Função de envio de email de verificação
@@ -44,7 +45,7 @@ async function sendAccountVerificationEmail(to: string, verificationUrl: string,
 
   try {
     const info = await emailTransporter.sendMail({
-      from: 'webfinance@example.com', // Qualquer email funciona com Mailtrap
+      from: 'WebFinance <seu-email@gmail.com>', // Substitua pelo seu email
       to,
       subject,
       text,
